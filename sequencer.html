@@ -1508,6 +1508,379 @@
     input.click();
   }
 
+  // ---------- classic drum machine voices ----------
+  // TR-808 — deep boomy kick, long sub tail, very clean noise hats
+  function v808Kick(ctx, t, out, tr) {
+    const m = semi(tr.tune);
+    const o = ctx.createOscillator(), og = ctx.createGain();
+    o.type = 'sine';
+    o.frequency.setValueAtTime(120 * m, t);
+    o.frequency.exponentialRampToValueAtTime(45 * m, t + 0.05);
+    og.gain.setValueAtTime(0.0001, t);
+    og.gain.exponentialRampToValueAtTime(1, t + 0.003);
+    og.gain.exponentialRampToValueAtTime(0.0001, t + 1.4);
+    o.connect(og).connect(out); o.start(t); o.stop(t + 1.5);
+    const cs = ctx.createBufferSource(); cs.buffer = getNoise(ctx);
+    const chp = ctx.createBiquadFilter(); chp.type='highpass'; chp.frequency.value = 3000;
+    const cg = ctx.createGain();
+    cg.gain.setValueAtTime(0.0001, t);
+    cg.gain.exponentialRampToValueAtTime(0.3, t + 0.001);
+    cg.gain.exponentialRampToValueAtTime(0.0001, t + 0.008);
+    cs.connect(chp).connect(cg).connect(out); cs.start(t); cs.stop(t + 0.02);
+  }
+  function v808Snare(ctx, t, out, tr) {
+    const m = semi(tr.tune);
+    const o1 = ctx.createOscillator(); o1.type='triangle'; o1.frequency.value = 180*m;
+    const o2 = ctx.createOscillator(); o2.type='triangle'; o2.frequency.value = 330*m;
+    const og = ctx.createGain();
+    og.gain.setValueAtTime(0.0001, t);
+    og.gain.exponentialRampToValueAtTime(0.4, t + 0.001);
+    og.gain.exponentialRampToValueAtTime(0.0001, t + 0.12);
+    o1.connect(og); o2.connect(og); og.connect(out);
+    o1.start(t); o1.stop(t+0.15); o2.start(t); o2.stop(t+0.15);
+    const ns = ctx.createBufferSource(); ns.buffer = getNoise(ctx);
+    const nhp = ctx.createBiquadFilter(); nhp.type='highpass'; nhp.frequency.value = 1500*m;
+    const ng = ctx.createGain();
+    ng.gain.setValueAtTime(0.0001, t);
+    ng.gain.exponentialRampToValueAtTime(0.55, t + 0.001);
+    ng.gain.exponentialRampToValueAtTime(0.0001, t + 0.2);
+    ns.connect(nhp).connect(ng).connect(out); ns.start(t); ns.stop(t + 0.25);
+  }
+  function v808Hat(ctx, t, out, tr) {
+    const m = semi(tr.tune);
+    const s = ctx.createBufferSource(); s.buffer = getNoise(ctx);
+    const hp = ctx.createBiquadFilter(); hp.type='highpass'; hp.frequency.value = 9500*m;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.4, t + 0.001);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.04);
+    s.connect(hp).connect(g).connect(out); s.start(t); s.stop(t + 0.06);
+  }
+  function v808OHat(ctx, t, out, tr) {
+    const m = semi(tr.tune);
+    const s = ctx.createBufferSource(); s.buffer = getNoise(ctx);
+    const hp = ctx.createBiquadFilter(); hp.type='highpass'; hp.frequency.value = 8500*m;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.4, t + 0.002);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.5);
+    s.connect(hp).connect(g).connect(out); s.start(t); s.stop(t + 0.55);
+  }
+  function v808Cowbell(ctx, t, out, tr) {
+    const m = semi(tr.tune);
+    const o1 = ctx.createOscillator(); o1.type='square'; o1.frequency.value = 560*m;
+    const o2 = ctx.createOscillator(); o2.type='square'; o2.frequency.value = 840*m;
+    const bp = ctx.createBiquadFilter(); bp.type='bandpass'; bp.frequency.value = 700*m; bp.Q.value = 3;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.35, t + 0.001);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.3);
+    o1.connect(bp); o2.connect(bp); bp.connect(g).connect(out);
+    o1.start(t); o1.stop(t+0.35); o2.start(t); o2.stop(t+0.35);
+  }
+  function v808Clap(ctx, t, out, tr) {
+    const m = semi(tr.tune);
+    const burst = (t0, dur, peak) => {
+      const s = ctx.createBufferSource(); s.buffer = getNoise(ctx);
+      const bp = ctx.createBiquadFilter(); bp.type='bandpass';
+      bp.frequency.value = 1100*m; bp.Q.value = 1.4;
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0.0001, t0);
+      g.gain.exponentialRampToValueAtTime(peak, t0 + 0.001);
+      g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+      s.connect(bp).connect(g).connect(out); s.start(t0); s.stop(t0 + dur + 0.05);
+    };
+    burst(t, 0.012, 0.5);
+    burst(t + 0.010, 0.012, 0.5);
+    burst(t + 0.020, 0.012, 0.5);
+    burst(t + 0.030, 0.18, 0.35);
+  }
+
+  // TR-909 — punchy hybrid kick with click, tonal+noise snare, metallic noise cymbals
+  function v909Kick(ctx, t, out, tr) {
+    const m = semi(tr.tune);
+    const o = ctx.createOscillator(); o.type='sine';
+    o.frequency.setValueAtTime(180 * m, t);
+    o.frequency.exponentialRampToValueAtTime(50 * m, t + 0.04);
+    const og = ctx.createGain();
+    og.gain.setValueAtTime(0.0001, t);
+    og.gain.exponentialRampToValueAtTime(1, t + 0.002);
+    og.gain.exponentialRampToValueAtTime(0.0001, t + 0.4);
+    o.connect(og).connect(out); o.start(t); o.stop(t + 0.45);
+    const ts = ctx.createOscillator(); ts.type='triangle'; ts.frequency.value = 200 * m;
+    const tg = ctx.createGain();
+    tg.gain.setValueAtTime(0.0001, t);
+    tg.gain.exponentialRampToValueAtTime(0.4, t + 0.001);
+    tg.gain.exponentialRampToValueAtTime(0.0001, t + 0.012);
+    ts.connect(tg).connect(out); ts.start(t); ts.stop(t + 0.015);
+  }
+  function v909Snare(ctx, t, out, tr) {
+    const m = semi(tr.tune);
+    const o1 = ctx.createOscillator(); o1.type='triangle'; o1.frequency.value = 200*m;
+    const o2 = ctx.createOscillator(); o2.type='triangle'; o2.frequency.value = 350*m;
+    const og = ctx.createGain();
+    og.gain.setValueAtTime(0.0001, t);
+    og.gain.exponentialRampToValueAtTime(0.5, t + 0.001);
+    og.gain.exponentialRampToValueAtTime(0.0001, t + 0.1);
+    o1.connect(og); o2.connect(og); og.connect(out);
+    o1.start(t); o1.stop(t+0.12); o2.start(t); o2.stop(t+0.12);
+    const ns = ctx.createBufferSource(); ns.buffer = getNoise(ctx);
+    const nhp = ctx.createBiquadFilter(); nhp.type='highpass'; nhp.frequency.value = 2000*m;
+    const ng = ctx.createGain();
+    ng.gain.setValueAtTime(0.0001, t);
+    ng.gain.exponentialRampToValueAtTime(0.65, t + 0.001);
+    ng.gain.exponentialRampToValueAtTime(0.0001, t + 0.16);
+    ns.connect(nhp).connect(ng).connect(out); ns.start(t); ns.stop(t + 0.2);
+  }
+  function v909Hat(ctx, t, out, tr) {
+    const m = semi(tr.tune);
+    const s = ctx.createBufferSource(); s.buffer = getNoise(ctx);
+    const bp = ctx.createBiquadFilter(); bp.type='bandpass'; bp.frequency.value = 7000*m; bp.Q.value = 1;
+    const hp = ctx.createBiquadFilter(); hp.type='highpass'; hp.frequency.value = 6000*m;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.45, t + 0.001);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.045);
+    s.connect(hp).connect(bp).connect(g).connect(out); s.start(t); s.stop(t + 0.06);
+  }
+  function v909OHat(ctx, t, out, tr) {
+    const m = semi(tr.tune);
+    const s = ctx.createBufferSource(); s.buffer = getNoise(ctx);
+    const bp = ctx.createBiquadFilter(); bp.type='bandpass'; bp.frequency.value = 6500*m; bp.Q.value = 0.8;
+    const hp = ctx.createBiquadFilter(); hp.type='highpass'; hp.frequency.value = 5500*m;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.4, t + 0.002);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.4);
+    s.connect(hp).connect(bp).connect(g).connect(out); s.start(t); s.stop(t + 0.45);
+  }
+  function v909Crash(ctx, t, out, tr) {
+    const m = semi(tr.tune);
+    const s = ctx.createBufferSource(); s.buffer = getNoise(ctx);
+    const hp = ctx.createBiquadFilter(); hp.type='highpass'; hp.frequency.value = 4500*m;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.5, t + 0.005);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 1.8);
+    s.connect(hp).connect(g).connect(out); s.start(t); s.stop(t + 1.9);
+  }
+
+  // TR-707 — cleaner PCM-flavoured punch, snappy crisp snare
+  function v707Kick(ctx, t, out, tr) {
+    const m = semi(tr.tune);
+    const o = ctx.createOscillator(); o.type='sine';
+    o.frequency.setValueAtTime(160 * m, t);
+    o.frequency.exponentialRampToValueAtTime(60 * m, t + 0.05);
+    const og = ctx.createGain();
+    og.gain.setValueAtTime(0.0001, t);
+    og.gain.exponentialRampToValueAtTime(1, t + 0.002);
+    og.gain.exponentialRampToValueAtTime(0.0001, t + 0.25);
+    o.connect(og).connect(out); o.start(t); o.stop(t + 0.3);
+    const cs = ctx.createBufferSource(); cs.buffer = getNoise(ctx);
+    const chp = ctx.createBiquadFilter(); chp.type='highpass'; chp.frequency.value = 4000;
+    const cg = ctx.createGain();
+    cg.gain.setValueAtTime(0.0001, t);
+    cg.gain.exponentialRampToValueAtTime(0.5, t + 0.001);
+    cg.gain.exponentialRampToValueAtTime(0.0001, t + 0.006);
+    cs.connect(chp).connect(cg).connect(out); cs.start(t); cs.stop(t + 0.015);
+  }
+  function v707Snare(ctx, t, out, tr) {
+    const m = semi(tr.tune);
+    const ns = ctx.createBufferSource(); ns.buffer = getNoise(ctx);
+    const nhp = ctx.createBiquadFilter(); nhp.type='highpass'; nhp.frequency.value = 2500*m;
+    const ng = ctx.createGain();
+    ng.gain.setValueAtTime(0.0001, t);
+    ng.gain.exponentialRampToValueAtTime(0.6, t + 0.001);
+    ng.gain.exponentialRampToValueAtTime(0.0001, t + 0.1);
+    ns.connect(nhp).connect(ng).connect(out); ns.start(t); ns.stop(t + 0.12);
+    const o = ctx.createOscillator(); o.type='triangle'; o.frequency.value = 250*m;
+    const og = ctx.createGain();
+    og.gain.setValueAtTime(0.0001, t);
+    og.gain.exponentialRampToValueAtTime(0.4, t + 0.001);
+    og.gain.exponentialRampToValueAtTime(0.0001, t + 0.08);
+    o.connect(og).connect(out); o.start(t); o.stop(t + 0.1);
+  }
+  function v707Hat(ctx, t, out, tr) {
+    const m = semi(tr.tune);
+    const s = ctx.createBufferSource(); s.buffer = getNoise(ctx);
+    const hp = ctx.createBiquadFilter(); hp.type='highpass'; hp.frequency.value = 8000*m;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.4, t + 0.001);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.035);
+    s.connect(hp).connect(g).connect(out); s.start(t); s.stop(t + 0.05);
+  }
+  function v707OHat(ctx, t, out, tr) {
+    const m = semi(tr.tune);
+    const s = ctx.createBufferSource(); s.buffer = getNoise(ctx);
+    const hp = ctx.createBiquadFilter(); hp.type='highpass'; hp.frequency.value = 7500*m;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.4, t + 0.002);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.3);
+    s.connect(hp).connect(g).connect(out); s.start(t); s.stop(t + 0.35);
+  }
+
+  // LinnDrum — tight, crisp, 80s pop drums (sample-inspired)
+  function vLinnKick(ctx, t, out, tr) {
+    const m = semi(tr.tune);
+    const o = ctx.createOscillator(); o.type='sine';
+    o.frequency.setValueAtTime(140 * m, t);
+    o.frequency.exponentialRampToValueAtTime(55 * m, t + 0.06);
+    const og = ctx.createGain();
+    og.gain.setValueAtTime(0.0001, t);
+    og.gain.exponentialRampToValueAtTime(1, t + 0.002);
+    og.gain.exponentialRampToValueAtTime(0.0001, t + 0.3);
+    o.connect(og).connect(out); o.start(t); o.stop(t + 0.35);
+    const o2 = ctx.createOscillator(); o2.type='triangle'; o2.frequency.value = 100*m;
+    const og2 = ctx.createGain();
+    og2.gain.setValueAtTime(0.0001, t);
+    og2.gain.exponentialRampToValueAtTime(0.4, t + 0.001);
+    og2.gain.exponentialRampToValueAtTime(0.0001, t + 0.08);
+    o2.connect(og2).connect(out); o2.start(t); o2.stop(t + 0.1);
+  }
+  function vLinnSnare(ctx, t, out, tr) {
+    const m = semi(tr.tune);
+    const o = ctx.createOscillator(); o.type='triangle';
+    o.frequency.setValueAtTime(230*m, t);
+    o.frequency.exponentialRampToValueAtTime(180*m, t + 0.05);
+    const og = ctx.createGain();
+    og.gain.setValueAtTime(0.0001, t);
+    og.gain.exponentialRampToValueAtTime(0.5, t + 0.001);
+    og.gain.exponentialRampToValueAtTime(0.0001, t + 0.13);
+    o.connect(og).connect(out); o.start(t); o.stop(t + 0.15);
+    const ns = ctx.createBufferSource(); ns.buffer = getNoise(ctx);
+    const nhp = ctx.createBiquadFilter(); nhp.type='highpass'; nhp.frequency.value = 1800*m;
+    const ng = ctx.createGain();
+    ng.gain.setValueAtTime(0.0001, t);
+    ng.gain.exponentialRampToValueAtTime(0.6, t + 0.001);
+    ng.gain.exponentialRampToValueAtTime(0.0001, t + 0.14);
+    ns.connect(nhp).connect(ng).connect(out); ns.start(t); ns.stop(t + 0.18);
+  }
+  function vLinnHat(ctx, t, out, tr) {
+    const m = semi(tr.tune);
+    const s = ctx.createBufferSource(); s.buffer = getNoise(ctx);
+    const hp = ctx.createBiquadFilter(); hp.type='highpass'; hp.frequency.value = 7000*m;
+    const bp = ctx.createBiquadFilter(); bp.type='bandpass'; bp.frequency.value = 8500*m; bp.Q.value = 1.2;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.45, t + 0.001);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.035);
+    s.connect(hp).connect(bp).connect(g).connect(out); s.start(t); s.stop(t + 0.05);
+  }
+  function vLinnOHat(ctx, t, out, tr) {
+    const m = semi(tr.tune);
+    const s = ctx.createBufferSource(); s.buffer = getNoise(ctx);
+    const hp = ctx.createBiquadFilter(); hp.type='highpass'; hp.frequency.value = 6500*m;
+    const bp = ctx.createBiquadFilter(); bp.type='bandpass'; bp.frequency.value = 8000*m; bp.Q.value = 1;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.45, t + 0.002);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.35);
+    s.connect(hp).connect(bp).connect(g).connect(out); s.start(t); s.stop(t + 0.4);
+  }
+
+  // CR-78 — soft, mellow, lo-fi vintage analog
+  function vCr78Kick(ctx, t, out, tr) {
+    const m = semi(tr.tune);
+    const o = ctx.createOscillator(); o.type='sine';
+    o.frequency.setValueAtTime(110 * m, t);
+    o.frequency.exponentialRampToValueAtTime(55 * m, t + 0.08);
+    const og = ctx.createGain();
+    og.gain.setValueAtTime(0.0001, t);
+    og.gain.exponentialRampToValueAtTime(0.8, t + 0.003);
+    og.gain.exponentialRampToValueAtTime(0.0001, t + 0.4);
+    o.connect(og).connect(out); o.start(t); o.stop(t + 0.45);
+  }
+  function vCr78Snare(ctx, t, out, tr) {
+    const m = semi(tr.tune);
+    const ns = ctx.createBufferSource(); ns.buffer = getNoise(ctx);
+    const nhp = ctx.createBiquadFilter(); nhp.type='highpass'; nhp.frequency.value = 800*m;
+    const nlp = ctx.createBiquadFilter(); nlp.type='lowpass';  nlp.frequency.value = 4000*m;
+    const ng = ctx.createGain();
+    ng.gain.setValueAtTime(0.0001, t);
+    ng.gain.exponentialRampToValueAtTime(0.5, t + 0.001);
+    ng.gain.exponentialRampToValueAtTime(0.0001, t + 0.15);
+    ns.connect(nhp).connect(nlp).connect(ng).connect(out); ns.start(t); ns.stop(t + 0.18);
+    const o = ctx.createOscillator(); o.type='triangle'; o.frequency.value = 180*m;
+    const og = ctx.createGain();
+    og.gain.setValueAtTime(0.0001, t);
+    og.gain.exponentialRampToValueAtTime(0.4, t + 0.001);
+    og.gain.exponentialRampToValueAtTime(0.0001, t + 0.1);
+    o.connect(og).connect(out); o.start(t); o.stop(t + 0.12);
+  }
+  function vCr78Hat(ctx, t, out, tr) {
+    const m = semi(tr.tune);
+    const s = ctx.createBufferSource(); s.buffer = getNoise(ctx);
+    const hp = ctx.createBiquadFilter(); hp.type='highpass'; hp.frequency.value = 6000*m;
+    const lp = ctx.createBiquadFilter(); lp.type='lowpass';  lp.frequency.value = 10000*m;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.35, t + 0.001);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.04);
+    s.connect(hp).connect(lp).connect(g).connect(out); s.start(t); s.stop(t + 0.05);
+  }
+  function vCr78OHat(ctx, t, out, tr) {
+    const m = semi(tr.tune);
+    const s = ctx.createBufferSource(); s.buffer = getNoise(ctx);
+    const hp = ctx.createBiquadFilter(); hp.type='highpass'; hp.frequency.value = 5500*m;
+    const lp = ctx.createBiquadFilter(); lp.type='lowpass';  lp.frequency.value = 9000*m;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.35, t + 0.002);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.25);
+    s.connect(hp).connect(lp).connect(g).connect(out); s.start(t); s.stop(t + 0.3);
+  }
+
+  // Boss DR-110 — small, slightly compressed analog
+  function vDrKick(ctx, t, out, tr) {
+    const m = semi(tr.tune);
+    const o = ctx.createOscillator(); o.type='sine';
+    o.frequency.setValueAtTime(135 * m, t);
+    o.frequency.exponentialRampToValueAtTime(50 * m, t + 0.06);
+    const og = ctx.createGain();
+    og.gain.setValueAtTime(0.0001, t);
+    og.gain.exponentialRampToValueAtTime(0.85, t + 0.003);
+    og.gain.exponentialRampToValueAtTime(0.0001, t + 0.3);
+    o.connect(og).connect(out); o.start(t); o.stop(t + 0.35);
+  }
+  function vDrSnare(ctx, t, out, tr) {
+    const m = semi(tr.tune);
+    const ns = ctx.createBufferSource(); ns.buffer = getNoise(ctx);
+    const nhp = ctx.createBiquadFilter(); nhp.type='highpass'; nhp.frequency.value = 1300*m;
+    const ng = ctx.createGain();
+    ng.gain.setValueAtTime(0.0001, t);
+    ng.gain.exponentialRampToValueAtTime(0.55, t + 0.001);
+    ng.gain.exponentialRampToValueAtTime(0.0001, t + 0.13);
+    ns.connect(nhp).connect(ng).connect(out); ns.start(t); ns.stop(t + 0.16);
+    const o = ctx.createOscillator(); o.type='triangle'; o.frequency.value = 200*m;
+    const og = ctx.createGain();
+    og.gain.setValueAtTime(0.0001, t);
+    og.gain.exponentialRampToValueAtTime(0.4, t + 0.001);
+    og.gain.exponentialRampToValueAtTime(0.0001, t + 0.1);
+    o.connect(og).connect(out); o.start(t); o.stop(t + 0.12);
+  }
+  function vDrHat(ctx, t, out, tr) {
+    const m = semi(tr.tune);
+    const s = ctx.createBufferSource(); s.buffer = getNoise(ctx);
+    const hp = ctx.createBiquadFilter(); hp.type='highpass'; hp.frequency.value = 7500*m;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.4, t + 0.001);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.03);
+    s.connect(hp).connect(g).connect(out); s.start(t); s.stop(t + 0.05);
+  }
+  function vDrOHat(ctx, t, out, tr) {
+    const m = semi(tr.tune);
+    const s = ctx.createBufferSource(); s.buffer = getNoise(ctx);
+    const hp = ctx.createBiquadFilter(); hp.type='highpass'; hp.frequency.value = 7000*m;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.4, t + 0.002);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.28);
+    s.connect(hp).connect(g).connect(out); s.start(t); s.stop(t + 0.32);
+  }
+
   // ---------- tracks ----------
   const DRUM_VOICES = {
     kick:      vKick,
@@ -1521,6 +1894,24 @@
     'tom-mid': makeTom(120),
     'tom-low': makeTom(75),
     clave:     vClave,
+    // TR-808
+    '808 Kick': v808Kick, '808 Snare': v808Snare, '808 Clap': v808Clap,
+    '808 Hat': v808Hat, '808 OHat': v808OHat, '808 Cowbell': v808Cowbell,
+    // TR-909
+    '909 Kick': v909Kick, '909 Snare': v909Snare,
+    '909 Hat': v909Hat, '909 OHat': v909OHat, '909 Crash': v909Crash,
+    // TR-707
+    '707 Kick': v707Kick, '707 Snare': v707Snare,
+    '707 Hat': v707Hat, '707 OHat': v707OHat,
+    // LinnDrum
+    'Linn Kick': vLinnKick, 'Linn Snare': vLinnSnare,
+    'Linn Hat': vLinnHat, 'Linn OHat': vLinnOHat,
+    // CR-78
+    'CR78 Kick': vCr78Kick, 'CR78 Snare': vCr78Snare,
+    'CR78 Hat': vCr78Hat, 'CR78 OHat': vCr78OHat,
+    // Boss DR-110
+    'DR Kick': vDrKick, 'DR Snare': vDrSnare,
+    'DR Hat': vDrHat, 'DR OHat': vDrOHat,
   };
   const KIND_LABELS = {
     drum: 'Drum', bass: 'Bass', lead: 'Synth', chord: 'Chord',
@@ -1957,10 +2348,22 @@
     const w = el('div', 'knob');
     w.appendChild(el('label', null, label));
     const s = el('select');
-    for (const o of opts) {
-      const op = el('option', null, o); op.value = o;
-      if (o === val) op.selected = true;
-      s.appendChild(op);
+    const fill = (parent, items) => {
+      for (const o of items) {
+        const op = el('option', null, o); op.value = o;
+        if (o === val) op.selected = true;
+        parent.appendChild(op);
+      }
+    };
+    if (Array.isArray(opts)) {
+      fill(s, opts);
+    } else if (opts && typeof opts === 'object') {
+      for (const groupName of Object.keys(opts)) {
+        const og = document.createElement('optgroup');
+        og.label = groupName;
+        fill(og, opts[groupName]);
+        s.appendChild(og);
+      }
     }
     s.addEventListener('change', () => onChange(s.value));
     w.appendChild(s); return w;
@@ -2732,8 +3135,17 @@
     }
 
     if (track.kind === 'drum') {
+      const drumGroups = {
+        'Generic':  ['kick','snare','clap','hat','open-hat','ride','crash','tom-hi','tom-mid','tom-low','clave'],
+        'TR-808':   ['808 Kick','808 Snare','808 Clap','808 Hat','808 OHat','808 Cowbell'],
+        'TR-909':   ['909 Kick','909 Snare','909 Hat','909 OHat','909 Crash'],
+        'TR-707':   ['707 Kick','707 Snare','707 Hat','707 OHat'],
+        'LinnDrum': ['Linn Kick','Linn Snare','Linn Hat','Linn OHat'],
+        'CR-78':    ['CR78 Kick','CR78 Snare','CR78 Hat','CR78 OHat'],
+        'Boss DR':  ['DR Kick','DR Snare','DR Hat','DR OHat'],
+      };
       k.appendChild(group('Drum',
-        selectField('Type', Object.keys(DRUM_VOICES), track.voiceType, v => {
+        selectField('Type', drumGroups, track.voiceType, v => {
           track.voiceType = v;
           track.voice = DRUM_VOICES[v];
         }),
