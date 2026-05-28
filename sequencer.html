@@ -707,6 +707,7 @@
       <div class="transport">
         <button id="play" class="play">Play</button>
         <button id="rec" class="small rec">● Rec</button>
+        <button id="realign" class="small" title="snap every track back to step 0 of its loop (kills timing drift)">↺ Sync</button>
         <div class="field">
           <label for="bpm">BPM</label>
           <input id="bpm" type="number" min="20" max="300" value="118" />
@@ -729,6 +730,7 @@
         <button class="small add-track" data-kind="bass">+ Bass</button>
         <button class="small add-track" data-kind="lead">+ Synth</button>
         <button class="small add-track" data-kind="chord">+ Chord</button>
+        <button class="small add-track" data-kind="mellotron">+ Mellotron</button>
         <button class="small add-track" data-kind="mic">+ Mic</button>
         <button class="small add-track" data-kind="granular">+ Granular</button>
       </div>
@@ -1250,6 +1252,131 @@
     amp.gain.linearRampToValueAtTime(0.0001, holdEnd + tr.release);
 
     const panner = ctx.createStereoPanner(); panner.pan.value = 0;
+
+    const anyLFO = tr.lfoCut > 0 || tr.lfoRes > 0 || tr.lfoPit > 0 || tr.lfoAmp > 0 || tr.lfoPan > 0;
+    let lfo = null;
+    if (anyLFO) {
+      lfo = ctx.createOscillator();
+      lfo.type = tr.lfoShape || 'sine';
+      lfo.frequency.value = tr.lfoRate;
+      lfo.start(t); lfo.stop(off);
+    }
+
+    let postFilter = f2;
+    if (anyLFO && tr.lfoAmp > 0) {
+      const dc = ctx.createConstantSource(); dc.offset.value = 1;
+      const trem = ctx.createGain(); trem.gain.value = 1;
+      const ag = ctx.createGain(); ag.gain.value = tr.lfoAmp * 0.9;
+      lfo.connect(ag).connect(trem.gain);
+      dc.connect(trem.gain);
+      dc.start(t); dc.stop(off);
+      f2.connect(trem);
+      postFilter = trem;
+    }
+    mix.connect(f1).connect(f2);
+    postFilter.connect(amp).connect(panner).connect(out);
+
+    if (anyLFO) {
+      if (tr.lfoCut > 0) {
+        const g = ctx.createGain(); g.gain.value = tr.lfoCut * 3000;
+        lfo.connect(g);
+        g.connect(f1.frequency); g.connect(f2.frequency);
+      }
+      if (tr.lfoRes > 0) {
+        const g = ctx.createGain(); g.gain.value = tr.lfoRes * 10;
+        lfo.connect(g);
+        g.connect(f1.Q); g.connect(f2.Q);
+      }
+      if (tr.lfoPit > 0) {
+        const g = ctx.createGain(); g.gain.value = tr.lfoPit * 100;
+        lfo.connect(g);
+        allOscs.forEach(o => g.connect(o.detune));
+      }
+      if (tr.lfoPan > 0) {
+        const g = ctx.createGain(); g.gain.value = tr.lfoPan;
+        lfo.connect(g).connect(panner.pan);
+      }
+    }
+  }
+
+  // ---------- mellotron (long sustained note / chord pad) ----------
+  const MELLOTRON_VOICINGS = {
+    single:      [0],
+    octave:      [0, 12],
+    fifth:       [0, 7],
+    'triad-min': [0, 3, 7],
+    'triad-maj': [0, 4, 7],
+    sus4:        [0, 5, 7],
+    min7:        [0, 3, 7, 10],
+    maj7:        [0, 4, 7, 11],
+    add9:        [0, 4, 7, 14],
+  };
+  function vMellotron(ctx, t, out, tr, step, env) {
+    const offset = (step && step.pitch) || 0;
+    const baseMidi = tr.root + offset;
+    const intervals = MELLOTRON_VOICINGS[tr.voicing] || [0];
+    const midiNotes = intervals.map(iv => baseMidi + iv);
+    const stepDur = env.stepDur;
+    const holdEnd = t + stepDur * tr.lengthSteps;
+    const off     = holdEnd + Math.max(tr.release, tr.fRelease) + 0.2;
+
+    // 24 dB lowpass like the chord engine
+    const f1 = ctx.createBiquadFilter(); f1.type = 'lowpass'; f1.Q.value = tr.reso;
+    const f2 = ctx.createBiquadFilter(); f2.type = 'lowpass'; f2.Q.value = tr.reso * 0.6;
+    const baseCut = tr.cutoff;
+    const peakCut = Math.min(18000, baseCut * (1 + tr.fEnvAmt * 10));
+    const sustCut = baseCut + (peakCut - baseCut) * tr.fSustain;
+    [f1, f2].forEach(f => {
+      f.frequency.setValueAtTime(baseCut, t);
+      f.frequency.linearRampToValueAtTime(peakCut, t + tr.fAttack);
+      f.frequency.linearRampToValueAtTime(sustCut, t + tr.fAttack + tr.fDecay);
+      f.frequency.setValueAtTime(sustCut, holdEnd);
+      f.frequency.linearRampToValueAtTime(baseCut, holdEnd + tr.fRelease);
+    });
+
+    const mix = ctx.createGain();
+    mix.gain.value = 1 / Math.max(2, midiNotes.length);
+
+    const allOscs = [];
+    midiNotes.forEach((midi, i) => {
+      const baseF = midiToFreq(midi);
+      const center = (i - (midiNotes.length - 1) / 2);
+      // small per-voice drift = mellotron-flavour wobble
+      const drift = (Math.random() * 6 - 3);
+
+      const oa = createOsc(ctx, tr.waveA, tr.pwA);
+      oa.frequency.value = baseF * Math.pow(2, tr.octA / 12) * semi(tr.tuneA / 100);
+      oa.detune.value = center * 6 + drift;
+      const oaG = ctx.createGain(); oaG.gain.value = (1 - tr.mix);
+      oa.connect(oaG).connect(mix);
+
+      const ob = createOsc(ctx, tr.waveB, tr.pwB);
+      ob.frequency.value = baseF * Math.pow(2, tr.octB / 12) * semi(tr.tuneB / 100);
+      ob.detune.value = tr.detuneB + center * 6 + drift * -1;
+      const obG = ctx.createGain(); obG.gain.value = tr.mix;
+      ob.connect(obG).connect(mix);
+
+      oa.start(t); oa.stop(off);
+      ob.start(t); ob.stop(off);
+      allOscs.push(oa, ob);
+    });
+
+    if (tr.noise > 0) {
+      const ns = ctx.createBufferSource(); ns.buffer = getNoise(ctx);
+      const nsG = ctx.createGain(); nsG.gain.value = tr.noise * 0.18;
+      ns.connect(nsG).connect(mix);
+      ns.start(t); ns.stop(off);
+    }
+
+    const amp = ctx.createGain();
+    amp.gain.setValueAtTime(0.0001, t);
+    amp.gain.linearRampToValueAtTime(1, t + tr.attack);
+    amp.gain.linearRampToValueAtTime(tr.sustain, t + tr.attack + tr.decay);
+    amp.gain.setValueAtTime(tr.sustain, holdEnd);
+    amp.gain.linearRampToValueAtTime(0.0001, holdEnd + tr.release);
+
+    const panner = ctx.createStereoPanner();
+    panner.pan.value = 0;
 
     const anyLFO = tr.lfoCut > 0 || tr.lfoRes > 0 || tr.lfoPit > 0 || tr.lfoAmp > 0 || tr.lfoPan > 0;
     let lfo = null;
@@ -1915,7 +2042,7 @@
   };
   const KIND_LABELS = {
     drum: 'Drum', bass: 'Bass', lead: 'Synth', chord: 'Chord',
-    mic: 'Mic', granular: 'Granular',
+    mellotron: 'Mellotron', mic: 'Mic', granular: 'Granular',
   };
 
   let nextTrackId = 1;
@@ -1988,6 +2115,19 @@
           lfoCut: 0, lfoRes: 0, lfoPit: 0, lfoAmp: 0, lfoPan: 0,
         };
         break;
+      case 'mellotron':
+        specific = {
+          voice: vMellotron, root: 60, voicing: 'single', lengthSteps: 8,
+          waveA: 'sawtooth', octA: 0, tuneA: 0, pwA: 0.5,
+          waveB: 'triangle', octB: 0, tuneB: 0, detuneB: 6, pwB: 0.5,
+          mix: 0.5, noise: 0,
+          cutoff: 3000, reso: 1, fEnvAmt: 0.15,
+          fAttack: 0.5, fDecay: 0.5, fSustain: 0.6, fRelease: 1.0,
+          attack: 0.5, decay: 0.5, sustain: 0.85, release: 1.5,
+          lfoRate: 4, lfoShape: 'sine',
+          lfoCut: 0, lfoRes: 0, lfoPit: 0.04, lfoAmp: 0, lfoPan: 0,
+        };
+        break;
       case 'mic':
         specific = {
           voice: null, steps: 0,
@@ -2024,6 +2164,7 @@
     if (t.kind === 'lead')   t.voice = vLead;
     if (t.kind === 'chord')  t.voice = vChord;
     if (t.kind === 'granular') t.voice = vGranular;
+    if (t.kind === 'mellotron') t.voice = vMellotron;
     return t;
   }
 
@@ -2675,8 +2816,9 @@
         if (track.kind === 'chord') {
           entry.degree = Math.floor(Math.random() * 7);
         }
-        if (track.kind === 'granular') {
-          entry.pitch = Math.floor(Math.random() * 13) - 6;
+        if (track.kind === 'granular' || track.kind === 'mellotron') {
+          const scaleSemis = [0, 2, 3, 5, 7, 8, 10, 12];
+          entry.pitch = scaleSemis[Math.floor(Math.random() * scaleSemis.length)];
         }
         entry.vel = 0.6 + Math.random() * 0.4;
         track.pattern[i] = entry;
@@ -2765,7 +2907,305 @@
   }
 
   // ---------- presets (drum / bass / lead / chord) ----------
-  const PRESET_KINDS = new Set(['drum','bass','lead','chord']);
+  const PRESET_KINDS = new Set(['drum','bass','lead','chord','mellotron']);
+
+  // Bundled factory presets — classic Prophet-5 patches for lead (mono) and chord (poly).
+  const FACTORY_PRESETS = {
+    lead: {
+      '5th Lead': {
+        root: 60,
+        waveA: 'sawtooth', octA: 0, tuneA: 0, pwA: 0.5,
+        waveB: 'sawtooth', octB: 0, tuneB: 7, detuneB: 12, pwB: 0.5,
+        mix: 0.5, noise: 0,
+        cutoff: 3200, reso: 4, fEnvAmt: 0.45,
+        fAttack: 0.005, fDecay: 0.3, fSustain: 0.5, fRelease: 0.3,
+        attack: 0.005, decay: 0.2, sustain: 0.85, release: 0.4,
+        lfoRate: 5, lfoShape: 'sine',
+        lfoCut: 0, lfoRes: 0, lfoPit: 0.04, lfoAmp: 0, lfoPan: 0,
+      },
+      'Sync Lead': {
+        root: 60,
+        waveA: 'sawtooth', octA: 0, tuneA: 0, pwA: 0.5,
+        waveB: 'sawtooth', octB: 0, tuneB: 24, detuneB: 25, pwB: 0.5,
+        mix: 0.55, noise: 0,
+        cutoff: 4500, reso: 8, fEnvAmt: 0.55,
+        fAttack: 0.001, fDecay: 0.25, fSustain: 0.4, fRelease: 0.2,
+        attack: 0.001, decay: 0.15, sustain: 0.8, release: 0.2,
+        lfoRate: 5, lfoShape: 'sine',
+        lfoCut: 0, lfoRes: 0, lfoPit: 0, lfoAmp: 0, lfoPan: 0,
+      },
+      'Acid Bass': {
+        root: 36,
+        waveA: 'sawtooth', octA: 0, tuneA: 0, pwA: 0.5,
+        waveB: 'sawtooth', octB: 0, tuneB: 0, detuneB: 0, pwB: 0.5,
+        mix: 0.0, noise: 0,
+        cutoff: 800, reso: 14, fEnvAmt: 0.7,
+        fAttack: 0.001, fDecay: 0.2, fSustain: 0.0, fRelease: 0.15,
+        attack: 0.001, decay: 0.18, sustain: 0.0, release: 0.1,
+        lfoRate: 4, lfoShape: 'sine',
+        lfoCut: 0, lfoRes: 0, lfoPit: 0, lfoAmp: 0, lfoPan: 0,
+      },
+      'Soft Strings': {
+        root: 60,
+        waveA: 'sawtooth', octA: 0, tuneA: 0, pwA: 0.5,
+        waveB: 'sawtooth', octB: 0, tuneB: 0, detuneB: 10, pwB: 0.5,
+        mix: 0.5, noise: 0,
+        cutoff: 2200, reso: 1, fEnvAmt: 0.2,
+        fAttack: 0.5, fDecay: 0.5, fSustain: 0.5, fRelease: 0.6,
+        attack: 0.8, decay: 0.5, sustain: 0.9, release: 1.5,
+        lfoRate: 3, lfoShape: 'sine',
+        lfoCut: 0, lfoRes: 0, lfoPit: 0.03, lfoAmp: 0, lfoPan: 0,
+      },
+      'Brass Lead': {
+        root: 60,
+        waveA: 'sawtooth', octA: 0, tuneA: 0, pwA: 0.5,
+        waveB: 'sawtooth', octB: 0, tuneB: 0, detuneB: 8, pwB: 0.5,
+        mix: 0.5, noise: 0,
+        cutoff: 2500, reso: 2, fEnvAmt: 0.6,
+        fAttack: 0.02, fDecay: 0.15, fSustain: 0.5, fRelease: 0.3,
+        attack: 0.02, decay: 0.15, sustain: 0.7, release: 0.25,
+        lfoRate: 5, lfoShape: 'sine',
+        lfoCut: 0, lfoRes: 0, lfoPit: 0.02, lfoAmp: 0, lfoPan: 0,
+      },
+      'PWM Pad': {
+        root: 60,
+        waveA: 'pulse', octA: 0, tuneA: 0, pwA: 0.5,
+        waveB: 'pulse', octB: 0, tuneB: 0, detuneB: 10, pwB: 0.35,
+        mix: 0.5, noise: 0,
+        cutoff: 2500, reso: 1, fEnvAmt: 0.2,
+        fAttack: 0.4, fDecay: 0.5, fSustain: 0.6, fRelease: 0.5,
+        attack: 0.7, decay: 0.4, sustain: 0.85, release: 1.2,
+        lfoRate: 0.4, lfoShape: 'sine',
+        lfoCut: 0, lfoRes: 0, lfoPit: 0.03, lfoAmp: 0, lfoPan: 0,
+      },
+      'Pluck': {
+        root: 60,
+        waveA: 'sawtooth', octA: 0, tuneA: 0, pwA: 0.5,
+        waveB: 'pulse', octB: -12, tuneB: 0, detuneB: 0, pwB: 0.5,
+        mix: 0.4, noise: 0,
+        cutoff: 1500, reso: 6, fEnvAmt: 0.8,
+        fAttack: 0.001, fDecay: 0.1, fSustain: 0.0, fRelease: 0.1,
+        attack: 0.001, decay: 0.15, sustain: 0.0, release: 0.1,
+        lfoRate: 4, lfoShape: 'sine',
+        lfoCut: 0, lfoRes: 0, lfoPit: 0, lfoAmp: 0, lfoPan: 0,
+      },
+      'Bell Lead': {
+        root: 60,
+        waveA: 'sine', octA: 0, tuneA: 0, pwA: 0.5,
+        waveB: 'triangle', octB: 12, tuneB: 0, detuneB: 0, pwB: 0.5,
+        mix: 0.4, noise: 0,
+        cutoff: 4000, reso: 2, fEnvAmt: 0.3,
+        fAttack: 0.001, fDecay: 0.5, fSustain: 0.0, fRelease: 0.3,
+        attack: 0.001, decay: 0.5, sustain: 0.0, release: 0.3,
+        lfoRate: 4, lfoShape: 'sine',
+        lfoCut: 0, lfoRes: 0, lfoPit: 0, lfoAmp: 0, lfoPan: 0,
+      },
+      'Reso Sweep': {
+        root: 60,
+        waveA: 'sawtooth', octA: 0, tuneA: 0, pwA: 0.5,
+        waveB: 'sawtooth', octB: -12, tuneB: 0, detuneB: 0, pwB: 0.5,
+        mix: 0.5, noise: 0,
+        cutoff: 600, reso: 15, fEnvAmt: 0.85,
+        fAttack: 0.05, fDecay: 0.6, fSustain: 0.3, fRelease: 0.4,
+        attack: 0.005, decay: 0.2, sustain: 0.7, release: 0.3,
+        lfoRate: 0.3, lfoShape: 'triangle',
+        lfoCut: 0.4, lfoRes: 0, lfoPit: 0, lfoAmp: 0, lfoPan: 0,
+      },
+    },
+    chord: {
+      'Lush Strings': {
+        scale: 'minor', root: 48, seventh: true, ninth: false, lengthSteps: 4,
+        waveA: 'sawtooth', octA: 0, tuneA: 0, pwA: 0.5,
+        waveB: 'sawtooth', octB: 0, tuneB: 0, detuneB: 12, pwB: 0.5,
+        mix: 0.5, noise: 0,
+        cutoff: 2200, reso: 1, fEnvAmt: 0.2,
+        fAttack: 0.6, fDecay: 0.5, fSustain: 0.6, fRelease: 0.8,
+        attack: 0.8, decay: 0.4, sustain: 0.85, release: 1.5,
+        lfoRate: 3, lfoShape: 'sine',
+        lfoCut: 0, lfoRes: 0, lfoPit: 0.03, lfoAmp: 0, lfoPan: 0,
+      },
+      'Bright Stab': {
+        scale: 'minor', root: 48, seventh: true, ninth: false, lengthSteps: 2,
+        waveA: 'sawtooth', octA: 0, tuneA: 0, pwA: 0.5,
+        waveB: 'sawtooth', octB: 0, tuneB: 0, detuneB: 6, pwB: 0.5,
+        mix: 0.5, noise: 0,
+        cutoff: 3500, reso: 4, fEnvAmt: 0.5,
+        fAttack: 0.001, fDecay: 0.15, fSustain: 0.3, fRelease: 0.3,
+        attack: 0.001, decay: 0.15, sustain: 0.4, release: 0.3,
+        lfoRate: 4, lfoShape: 'sine',
+        lfoCut: 0, lfoRes: 0, lfoPit: 0, lfoAmp: 0, lfoPan: 0,
+      },
+      'Dub Stab': {
+        scale: 'minor', root: 48, seventh: true, ninth: false, lengthSteps: 2,
+        waveA: 'sawtooth', octA: 0, tuneA: 0, pwA: 0.5,
+        waveB: 'sawtooth', octB: -12, tuneB: 0, detuneB: 7, pwB: 0.5,
+        mix: 0.5, noise: 0,
+        cutoff: 1200, reso: 4, fEnvAmt: 0.4,
+        fAttack: 0.005, fDecay: 0.3, fSustain: 0.15, fRelease: 0.4,
+        attack: 0.005, decay: 0.18, sustain: 0.3, release: 0.5,
+        lfoRate: 4, lfoShape: 'sine',
+        lfoCut: 0, lfoRes: 0, lfoPit: 0, lfoAmp: 0, lfoPan: 0,
+      },
+      'Organ': {
+        scale: 'major', root: 48, seventh: false, ninth: false, lengthSteps: 4,
+        waveA: 'sine', octA: 0, tuneA: 0, pwA: 0.5,
+        waveB: 'sine', octB: 12, tuneB: 0, detuneB: 0, pwB: 0.5,
+        mix: 0.5, noise: 0,
+        cutoff: 4000, reso: 0.5, fEnvAmt: 0,
+        fAttack: 0.005, fDecay: 0.1, fSustain: 1, fRelease: 0.05,
+        attack: 0.005, decay: 0.1, sustain: 1, release: 0.1,
+        lfoRate: 4, lfoShape: 'sine',
+        lfoCut: 0, lfoRes: 0, lfoPit: 0, lfoAmp: 0, lfoPan: 0,
+      },
+      'Brass Section': {
+        scale: 'minor', root: 48, seventh: true, ninth: false, lengthSteps: 3,
+        waveA: 'sawtooth', octA: 0, tuneA: 0, pwA: 0.5,
+        waveB: 'pulse', octB: 0, tuneB: 0, detuneB: 7, pwB: 0.3,
+        mix: 0.5, noise: 0,
+        cutoff: 2500, reso: 2, fEnvAmt: 0.5,
+        fAttack: 0.03, fDecay: 0.2, fSustain: 0.6, fRelease: 0.3,
+        attack: 0.03, decay: 0.2, sustain: 0.7, release: 0.3,
+        lfoRate: 4, lfoShape: 'sine',
+        lfoCut: 0, lfoRes: 0, lfoPit: 0, lfoAmp: 0, lfoPan: 0,
+      },
+      'PWM Pad': {
+        scale: 'minor', root: 48, seventh: true, ninth: true, lengthSteps: 6,
+        waveA: 'pulse', octA: 0, tuneA: 0, pwA: 0.4,
+        waveB: 'pulse', octB: 0, tuneB: 0, detuneB: 8, pwB: 0.6,
+        mix: 0.5, noise: 0,
+        cutoff: 2500, reso: 1, fEnvAmt: 0.2,
+        fAttack: 0.5, fDecay: 0.5, fSustain: 0.6, fRelease: 0.5,
+        attack: 0.7, decay: 0.4, sustain: 0.85, release: 1.2,
+        lfoRate: 0.3, lfoShape: 'sine',
+        lfoCut: 0, lfoRes: 0, lfoPit: 0.03, lfoAmp: 0, lfoPan: 0,
+      },
+      'Bell Chord': {
+        scale: 'major', root: 60, seventh: true, ninth: false, lengthSteps: 4,
+        waveA: 'sine', octA: 0, tuneA: 0, pwA: 0.5,
+        waveB: 'triangle', octB: 12, tuneB: 0, detuneB: 0, pwB: 0.5,
+        mix: 0.4, noise: 0,
+        cutoff: 4500, reso: 2, fEnvAmt: 0.3,
+        fAttack: 0.001, fDecay: 0.5, fSustain: 0.0, fRelease: 0.3,
+        attack: 0.001, decay: 0.5, sustain: 0.0, release: 0.3,
+        lfoRate: 4, lfoShape: 'sine',
+        lfoCut: 0, lfoRes: 0, lfoPit: 0, lfoAmp: 0, lfoPan: 0,
+      },
+      'Sync Stab': {
+        scale: 'minor', root: 48, seventh: false, ninth: false, lengthSteps: 1,
+        waveA: 'sawtooth', octA: 0, tuneA: 0, pwA: 0.5,
+        waveB: 'sawtooth', octB: 0, tuneB: 24, detuneB: 30, pwB: 0.5,
+        mix: 0.55, noise: 0,
+        cutoff: 3000, reso: 6, fEnvAmt: 0.5,
+        fAttack: 0.001, fDecay: 0.15, fSustain: 0.2, fRelease: 0.2,
+        attack: 0.001, decay: 0.15, sustain: 0.3, release: 0.2,
+        lfoRate: 4, lfoShape: 'sine',
+        lfoCut: 0, lfoRes: 0, lfoPit: 0, lfoAmp: 0, lfoPan: 0,
+      },
+      'Vintage Poly': {
+        scale: 'minor', root: 48, seventh: true, ninth: false, lengthSteps: 4,
+        waveA: 'sawtooth', octA: 0, tuneA: 0, pwA: 0.5,
+        waveB: 'sawtooth', octB: 0, tuneB: 0, detuneB: 6, pwB: 0.5,
+        mix: 0.5, noise: 0,
+        cutoff: 1800, reso: 2.5, fEnvAmt: 0.35,
+        fAttack: 0.01, fDecay: 0.4, fSustain: 0.5, fRelease: 0.5,
+        attack: 0.02, decay: 0.3, sustain: 0.7, release: 0.6,
+        lfoRate: 4, lfoShape: 'sine',
+        lfoCut: 0, lfoRes: 0, lfoPit: 0.02, lfoAmp: 0, lfoPan: 0,
+      },
+    },
+    mellotron: {
+      'Strings':       { root: 60, voicing: 'single', lengthSteps: 16,
+        waveA: 'sawtooth', octA: 0, tuneA: 0, pwA: 0.5,
+        waveB: 'sawtooth', octB: 0, tuneB: 0, detuneB: 8, pwB: 0.5,
+        mix: 0.5, noise: 0,
+        cutoff: 2500, reso: 1, fEnvAmt: 0.2,
+        fAttack: 1.0, fDecay: 0.8, fSustain: 0.7, fRelease: 1.5,
+        attack: 1.2, decay: 0.8, sustain: 0.9, release: 2.0,
+        lfoRate: 4, lfoShape: 'sine',
+        lfoCut: 0, lfoRes: 0, lfoPit: 0.05, lfoAmp: 0, lfoPan: 0,
+      },
+      'Choir':         { root: 60, voicing: 'single', lengthSteps: 16,
+        waveA: 'triangle', octA: 0, tuneA: 0, pwA: 0.5,
+        waveB: 'sine', octB: 0, tuneB: 0, detuneB: 6, pwB: 0.5,
+        mix: 0.4, noise: 0,
+        cutoff: 2000, reso: 1, fEnvAmt: 0.1,
+        fAttack: 1.5, fDecay: 0.8, fSustain: 0.6, fRelease: 2.0,
+        attack: 1.5, decay: 0.5, sustain: 0.85, release: 2.5,
+        lfoRate: 3, lfoShape: 'sine',
+        lfoCut: 0, lfoRes: 0, lfoPit: 0.08, lfoAmp: 0, lfoPan: 0,
+      },
+      'Flute':         { root: 72, voicing: 'single', lengthSteps: 8,
+        waveA: 'sine', octA: 0, tuneA: 0, pwA: 0.5,
+        waveB: 'triangle', octB: 12, tuneB: 0, detuneB: 0, pwB: 0.5,
+        mix: 0.3, noise: 0.05,
+        cutoff: 3500, reso: 0.5, fEnvAmt: 0.1,
+        fAttack: 0.3, fDecay: 0.4, fSustain: 0.8, fRelease: 0.8,
+        attack: 0.4, decay: 0.3, sustain: 0.9, release: 1.0,
+        lfoRate: 5, lfoShape: 'sine',
+        lfoCut: 0, lfoRes: 0, lfoPit: 0.04, lfoAmp: 0, lfoPan: 0,
+      },
+      'Brass':         { root: 60, voicing: 'single', lengthSteps: 8,
+        waveA: 'sawtooth', octA: 0, tuneA: 0, pwA: 0.5,
+        waveB: 'pulse', octB: 0, tuneB: 0, detuneB: 5, pwB: 0.35,
+        mix: 0.5, noise: 0,
+        cutoff: 2500, reso: 2, fEnvAmt: 0.4,
+        fAttack: 0.3, fDecay: 0.4, fSustain: 0.6, fRelease: 0.6,
+        attack: 0.2, decay: 0.3, sustain: 0.75, release: 0.8,
+        lfoRate: 4, lfoShape: 'sine',
+        lfoCut: 0, lfoRes: 0, lfoPit: 0.03, lfoAmp: 0, lfoPan: 0,
+      },
+      'Cellos':        { root: 48, voicing: 'single', lengthSteps: 16,
+        waveA: 'sawtooth', octA: 0, tuneA: 0, pwA: 0.5,
+        waveB: 'sawtooth', octB: -12, tuneB: 0, detuneB: 10, pwB: 0.5,
+        mix: 0.5, noise: 0,
+        cutoff: 1800, reso: 1.5, fEnvAmt: 0.15,
+        fAttack: 0.6, fDecay: 0.5, fSustain: 0.65, fRelease: 1.2,
+        attack: 0.7, decay: 0.5, sustain: 0.8, release: 1.5,
+        lfoRate: 4, lfoShape: 'sine',
+        lfoCut: 0, lfoRes: 0, lfoPit: 0.04, lfoAmp: 0, lfoPan: 0,
+      },
+      'Lush Pad':      { root: 48, voicing: 'triad-min', lengthSteps: 16,
+        waveA: 'sawtooth', octA: 0, tuneA: 0, pwA: 0.5,
+        waveB: 'sawtooth', octB: 0, tuneB: 0, detuneB: 10, pwB: 0.5,
+        mix: 0.5, noise: 0,
+        cutoff: 2200, reso: 1, fEnvAmt: 0.2,
+        fAttack: 1.0, fDecay: 0.8, fSustain: 0.65, fRelease: 1.5,
+        attack: 1.5, decay: 0.5, sustain: 0.9, release: 2.0,
+        lfoRate: 3, lfoShape: 'sine',
+        lfoCut: 0, lfoRes: 0, lfoPit: 0.05, lfoAmp: 0, lfoPan: 0,
+      },
+      'Drone Fifth':   { root: 36, voicing: 'fifth', lengthSteps: 32,
+        waveA: 'sawtooth', octA: 0, tuneA: 0, pwA: 0.5,
+        waveB: 'sawtooth', octB: 0, tuneB: 0, detuneB: 15, pwB: 0.5,
+        mix: 0.5, noise: 0.03,
+        cutoff: 1500, reso: 0.8, fEnvAmt: 0.1,
+        fAttack: 2.0, fDecay: 1.0, fSustain: 0.7, fRelease: 3.0,
+        attack: 2.0, decay: 1.0, sustain: 0.9, release: 3.0,
+        lfoRate: 0.3, lfoShape: 'sine',
+        lfoCut: 0.2, lfoRes: 0, lfoPit: 0.08, lfoAmp: 0, lfoPan: 0,
+      },
+      'Soft Octave':   { root: 60, voicing: 'octave', lengthSteps: 12,
+        waveA: 'triangle', octA: 0, tuneA: 0, pwA: 0.5,
+        waveB: 'triangle', octB: 0, tuneB: 0, detuneB: 4, pwB: 0.5,
+        mix: 0.5, noise: 0,
+        cutoff: 2200, reso: 0.7, fEnvAmt: 0.1,
+        fAttack: 0.8, fDecay: 0.6, fSustain: 0.7, fRelease: 1.5,
+        attack: 1.0, decay: 0.4, sustain: 0.85, release: 1.8,
+        lfoRate: 3.5, lfoShape: 'sine',
+        lfoCut: 0, lfoRes: 0, lfoPit: 0.04, lfoAmp: 0, lfoPan: 0,
+      },
+      'Glass Pad':     { root: 60, voicing: 'maj7', lengthSteps: 16,
+        waveA: 'sine', octA: 0, tuneA: 0, pwA: 0.5,
+        waveB: 'triangle', octB: 12, tuneB: 0, detuneB: 0, pwB: 0.5,
+        mix: 0.45, noise: 0,
+        cutoff: 3500, reso: 0.5, fEnvAmt: 0.15,
+        fAttack: 1.2, fDecay: 0.7, fSustain: 0.6, fRelease: 1.8,
+        attack: 1.5, decay: 0.6, sustain: 0.85, release: 2.2,
+        lfoRate: 3, lfoShape: 'sine',
+        lfoCut: 0, lfoRes: 0, lfoPit: 0.04, lfoAmp: 0, lfoPan: 0,
+      },
+    },
+  };
   function loadPresetStore() {
     try { return JSON.parse(localStorage.getItem('substrata-presets') || '{}'); }
     catch (e) { return {}; }
@@ -3010,36 +3450,65 @@
           sel.innerHTML = '';
           const def = el('option', null, '(load…)'); def.value = '';
           sel.appendChild(def);
-          const presets = getPresetsForKind(track.kind);
-          Object.keys(presets).sort().forEach(n => {
-            const op = el('option', null, n); op.value = n;
-            sel.appendChild(op);
-          });
+          const factory = (FACTORY_PRESETS[track.kind] || {});
+          const user    = getPresetsForKind(track.kind);
+          const fNames = Object.keys(factory).sort();
+          const uNames = Object.keys(user).sort();
+          if (fNames.length) {
+            const og = document.createElement('optgroup');
+            og.label = 'Factory';
+            fNames.forEach(n => {
+              const op = el('option', null, n); op.value = 'f:' + n;
+              og.appendChild(op);
+            });
+            sel.appendChild(og);
+          }
+          if (uNames.length) {
+            const og = document.createElement('optgroup');
+            og.label = 'User';
+            uNames.forEach(n => {
+              const op = el('option', null, n); op.value = 'u:' + n;
+              og.appendChild(op);
+            });
+            sel.appendChild(og);
+          }
         };
         refreshSel();
         sel.addEventListener('change', () => {
           if (!sel.value) return;
-          const presets = getPresetsForKind(track.kind);
-          const p = presets[sel.value];
+          const idx = sel.value.indexOf(':');
+          const src = sel.value.slice(0, idx);
+          const name = sel.value.slice(idx + 1);
+          const p = (src === 'f')
+            ? (FACTORY_PRESETS[track.kind] || {})[name]
+            : getPresetsForKind(track.kind)[name];
           if (!p) return;
           applyPresetToTrack(track, p);
           buildKnobs(track);
         });
         const saveBtn = el('button', 'mic-btn', 'Save');
-        saveBtn.title = 'save current sound as a preset';
+        saveBtn.title = 'save current sound as a user preset';
         saveBtn.addEventListener('click', () => {
-          const name = window.prompt('Save ' + track.kind + ' preset as:', sel.value || '');
+          // suggest current value (strip src prefix) if it's a user preset
+          let suggested = '';
+          if (sel.value && sel.value.startsWith('u:')) suggested = sel.value.slice(2);
+          const name = window.prompt('Save ' + track.kind + ' preset as:', suggested);
           if (!name) return;
           setPreset(track.kind, name, getTrackPresetParams(track));
           refreshSel();
-          sel.value = name;
+          sel.value = 'u:' + name;
         });
         const delBtn = el('button', 'mic-btn', 'Del');
-        delBtn.title = 'delete the selected preset';
+        delBtn.title = 'delete the selected user preset (factory presets cannot be deleted)';
         delBtn.addEventListener('click', () => {
           if (!sel.value) return;
-          if (window.confirm('Delete preset "' + sel.value + '"?')) {
-            deletePreset(track.kind, sel.value);
+          if (!sel.value.startsWith('u:')) {
+            window.alert('Factory presets cannot be deleted.');
+            return;
+          }
+          const name = sel.value.slice(2);
+          if (window.confirm('Delete preset "' + name + '"?')) {
+            deletePreset(track.kind, name);
             refreshSel();
           }
         });
@@ -3252,6 +3721,59 @@
       ));
     }
 
+    if (track.kind === 'mellotron') {
+      k.appendChild(group('Note',
+        numField('Root', 24, 84, track.root, n => track.root = n),
+        selectField('Voice', Object.keys(MELLOTRON_VOICINGS), track.voicing, v => track.voicing = v),
+        knob('Len', 1, 64, 1, track.lengthSteps, v => track.lengthSteps = v, v => v),
+      ));
+      k.appendChild(group('Osc A',
+        selectField('Wv', ['sawtooth','pulse','triangle','sine'], track.waveA, v => track.waveA = v),
+        knob('Oct', -24, 24, 1, track.octA, v => track.octA = v, v => (v >= 0 ? '+' : '') + v),
+        knob('Tun', -50, 50, 1, track.tuneA, v => track.tuneA = v, v => (v >= 0 ? '+' : '') + v),
+        knob('PW',  0.05, 0.95, 0.01, track.pwA, v => track.pwA = v, v => v.toFixed(2)),
+      ));
+      k.appendChild(group('Osc B',
+        selectField('Wv', ['sawtooth','pulse','triangle','sine'], track.waveB, v => track.waveB = v),
+        knob('Oct', -24, 24, 1, track.octB, v => track.octB = v, v => (v >= 0 ? '+' : '') + v),
+        knob('Tun', -50, 50, 1, track.tuneB, v => track.tuneB = v, v => (v >= 0 ? '+' : '') + v),
+        knob('Det', -50, 50, 1, track.detuneB, v => track.detuneB = v, v => (v >= 0 ? '+' : '') + v),
+        knob('PW',  0.05, 0.95, 0.01, track.pwB, v => track.pwB = v, v => v.toFixed(2)),
+      ));
+      k.appendChild(group('Mix',
+        knob('A/B', 0, 1, 0.01, track.mix, v => track.mix = v, v => v.toFixed(2)),
+        knob('Nse', 0, 1, 0.01, track.noise, v => track.noise = v, v => v.toFixed(2)),
+      ));
+      k.appendChild(group('Filter',
+        knob('Cut', 80, 12000, 10, track.cutoff, v => track.cutoff = v, v => Math.round(v)),
+        knob('Res', 0.1, 18, 0.1, track.reso, v => track.reso = v, v => v.toFixed(1)),
+        knob('Env', -1, 1, 0.01, track.fEnvAmt, v => track.fEnvAmt = v, v => v.toFixed(2)),
+      ));
+      k.appendChild(group('F-Env',
+        knob('A', 0.001, 3, 0.001, track.fAttack,  v => track.fAttack  = v, v => v.toFixed(3)),
+        knob('D', 0.01,  3, 0.01,  track.fDecay,   v => track.fDecay   = v, v => v.toFixed(2)),
+        knob('S', 0,     1, 0.01,  track.fSustain, v => track.fSustain = v, v => v.toFixed(2)),
+        knob('R', 0.01,  5, 0.01,  track.fRelease, v => track.fRelease = v, v => v.toFixed(2)),
+      ));
+      k.appendChild(group('A-Env',
+        knob('A', 0.001, 4, 0.001, track.attack,  v => track.attack  = v, v => v.toFixed(3)),
+        knob('D', 0.01,  3, 0.01,  track.decay,   v => track.decay   = v, v => v.toFixed(2)),
+        knob('S', 0,     1, 0.01,  track.sustain, v => track.sustain = v, v => v.toFixed(2)),
+        knob('R', 0.01,  6, 0.01,  track.release, v => track.release = v, v => v.toFixed(2)),
+      ));
+      k.appendChild(group('LFO',
+        knob('Rate', 0.05, 30, 0.05, track.lfoRate, v => track.lfoRate = v, v => v.toFixed(2)),
+        selectField('Shp', ['sine','triangle','square','sawtooth'], track.lfoShape, v => track.lfoShape = v),
+      ));
+      k.appendChild(group('LFO→',
+        knob('Cut', 0, 1, 0.01, track.lfoCut, v => track.lfoCut = v, v => v.toFixed(2)),
+        knob('Res', 0, 1, 0.01, track.lfoRes, v => track.lfoRes = v, v => v.toFixed(2)),
+        knob('Pit', 0, 1, 0.01, track.lfoPit, v => track.lfoPit = v, v => v.toFixed(2)),
+        knob('Amp', 0, 1, 0.01, track.lfoAmp, v => track.lfoAmp = v, v => v.toFixed(2)),
+        knob('Pan', 0, 1, 0.01, track.lfoPan, v => track.lfoPan = v, v => v.toFixed(2)),
+      ));
+    }
+
     if (track.kind === 'lead') {
       k.appendChild(group('Note',
         numField('Root', 24, 84, track.root, n => track.root = n),
@@ -3376,7 +3898,7 @@
         if (panRef) renderLane(panRef, track, i, 'pan');
       });
 
-      if (track.kind === 'bass' || track.kind === 'lead' || track.kind === 'granular') {
+      if (track.kind === 'bass' || track.kind === 'lead' || track.kind === 'granular' || track.kind === 'mellotron') {
         cell.addEventListener('wheel', (e) => {
           if (!track.pattern[i]) return;
           e.preventDefault();
@@ -3425,7 +3947,7 @@
         ctrl.appendChild(dn); ctrl.appendChild(up); ctrl.appendChild(sl);
         col.appendChild(ctrl);
       }
-      if (track.kind === 'granular') {
+      if (track.kind === 'granular' || track.kind === 'mellotron') {
         const ctrl = el('div', 'step-mini');
         const dn = el('button', null, '−');
         const up = el('button', null, '+');
@@ -3496,6 +4018,7 @@
     const base = { vel: 1, pan: 0 };
     if (track.kind === 'bass' || track.kind === 'lead') return { ...base, pitch: 0, slide: false };
     if (track.kind === 'granular') return { ...base, pitch: 0 };
+    if (track.kind === 'mellotron') return { ...base, pitch: 0 };
     if (track.kind === 'chord') return { ...base, degree: 0, quality: 'auto' };
     return base;
   }
@@ -3507,7 +4030,7 @@
     const on = !!track.pattern[i];
     cell.classList.toggle('on', on);
     cell.classList.toggle('slide', on && track.pattern[i].slide);
-    if (on && (track.kind === 'bass' || track.kind === 'lead' || track.kind === 'granular')) {
+    if (on && (track.kind === 'bass' || track.kind === 'lead' || track.kind === 'granular' || track.kind === 'mellotron')) {
       cell.textContent = String(track.pattern[i].pitch);
     } else if (on && track.kind === 'chord') {
       const numerals = ['I','II','III','IV','V','VI','VII'];
@@ -4286,6 +4809,13 @@
              'fAttack','fDecay','fSustain','fRelease',
              'attack','decay','sustain','release',
              'lfoRate','lfoShape','lfoCut','lfoRes','lfoPit','lfoAmp','lfoPan'],
+    mellotron: ['root','voicing','lengthSteps',
+             'waveA','octA','tuneA','pwA',
+             'waveB','octB','tuneB','detuneB','pwB',
+             'mix','noise','cutoff','reso','fEnvAmt',
+             'fAttack','fDecay','fSustain','fRelease',
+             'attack','decay','sustain','release',
+             'lfoRate','lfoShape','lfoCut','lfoRes','lfoPit','lfoAmp','lfoPan'],
     chord:  ['scale','root','seventh','ninth','lengthSteps',
              'waveA','octA','tuneA','pwA',
              'waveB','octB','tuneB','detuneB','pwB',
@@ -4587,6 +5117,19 @@
       document.body.classList.toggle('mode-mixing', mode === 'mixing');
       modeBtns.forEach(b => b.classList.toggle('on', b === btn));
     });
+  });
+
+  // Realign every track to step 0 — kills accumulated timing drift between channels
+  document.getElementById('realign').addEventListener('click', () => {
+    if (!audioCtx) return;
+    const startTime = audioCtx.currentTime + 0.06;
+    for (const t of tracks) {
+      t.nextStep = 0;
+      t.nextNoteTime = startTime;
+      t._prevFreq = null;
+      t._prevSlide = false;
+      t._lastTrigGain = null;
+    }
   });
 
   // Full screen
