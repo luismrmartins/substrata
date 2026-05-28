@@ -1684,6 +1684,29 @@
     }
     return ir;
   }
+  // Hard-ceiling soft-clip curve for a true brick-wall master limiter.
+  // Below `knee` the response is linear (no colouration).
+  // Between `knee` and `ceiling` the response is a soft tanh shoulder.
+  // Inputs above ±1 are clamped to the curve's endpoints by the WaveShaperNode,
+  // giving us an inviolable ceiling.
+  function makeLimiterCurve(knee, ceiling) {
+    const n = 8192;
+    const curve = new Float32Array(n);
+    const room = ceiling - knee;
+    for (let i = 0; i < n; i++) {
+      const x = (i / (n - 1)) * 2 - 1;
+      const ax = Math.abs(x);
+      const sign = x < 0 ? -1 : 1;
+      if (ax <= knee) {
+        curve[i] = x;
+      } else {
+        const above = (ax - knee) / (1 - knee);
+        curve[i] = sign * (knee + room * Math.tanh(above * 2.5));
+      }
+    }
+    return curve;
+  }
+
   function makeWarmthCurve(amount) {
     const n = 4096;
     const curve = new Float32Array(n);
@@ -1711,13 +1734,12 @@
     compressor.attack.value    = compCfg.attack;
     compressor.release.value   = compCfg.release;
     compressor.knee.value      = compCfg.knee;
-    // brick-wall limiter to catch peak transients (kick + bass on same step etc.)
-    masterLimiter = audioCtx.createDynamicsCompressor();
-    masterLimiter.threshold.value = -0.5;
-    masterLimiter.ratio.value     = 20;
-    masterLimiter.attack.value    = 0.001;
-    masterLimiter.release.value   = 0.05;
-    masterLimiter.knee.value      = 0;
+    // Brick-wall master limiter — WaveShaper with hard ceiling.
+    // Knee at 0.78 (linear below that), tanh shoulder up to ceiling 0.95.
+    // Inputs above ±1.0 are clamped by the node itself, so peaks can never clip.
+    masterLimiter = audioCtx.createWaveShaper();
+    masterLimiter.curve = makeLimiterCurve(0.78, 0.95);
+    masterLimiter.oversample = '4x';
     masterOut  = audioCtx.createGain();         masterOut.gain.value = master.vol;
     masterIn.connect(eqLow).connect(eqMid).connect(eqHigh)
             .connect(warmLow).connect(warmHigh).connect(warmShaper)
