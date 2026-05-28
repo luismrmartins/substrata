@@ -533,6 +533,17 @@
   button.mic-btn.on { background: var(--text); color: var(--bg); border-color: var(--text); }
   button.mic-btn:disabled { opacity: 0.35; cursor: not-allowed; }
   button.mic-btn:disabled:hover { border-color: var(--cell-border); }
+  select.preset-select {
+    background: transparent;
+    border: 1px solid var(--cell-border);
+    color: var(--text);
+    font: inherit;
+    font-size: 10px;
+    padding: 4px 6px;
+    max-width: 140px;
+    cursor: pointer;
+  }
+  select.preset-select:focus { outline: none; border-color: var(--text); }
   .sample-status { font-size: 10px; color: var(--muted); padding-left: 4px; }
   .grain-wave, .mic-scope {
     border: 1px solid var(--cell-border);
@@ -1536,6 +1547,7 @@
       mute: false, solo: false, armed: true,
       group: 0,
       swing: 0,
+      mono: false,
       trkLfoRate: 0.5, trkLfoShape: 'sine',
       trkLfoVolDepth: 0, trkLfoPanDepth: 0,
       expanded: true,
@@ -2222,6 +2234,50 @@
     rebuildDuckerSourceOptions();
   }
 
+  // ---------- presets (drum / bass / lead / chord) ----------
+  const PRESET_KINDS = new Set(['drum','bass','lead','chord']);
+  function loadPresetStore() {
+    try { return JSON.parse(localStorage.getItem('substrata-presets') || '{}'); }
+    catch (e) { return {}; }
+  }
+  function savePresetStore(store) {
+    try { localStorage.setItem('substrata-presets', JSON.stringify(store)); } catch (e) {}
+  }
+  function getPresetsForKind(kind) {
+    return loadPresetStore()[kind] || {};
+  }
+  function setPreset(kind, name, params) {
+    const store = loadPresetStore();
+    if (!store[kind]) store[kind] = {};
+    store[kind][name] = params;
+    savePresetStore(store);
+  }
+  function deletePreset(kind, name) {
+    const store = loadPresetStore();
+    if (store[kind]) delete store[kind][name];
+    savePresetStore(store);
+  }
+  function getTrackPresetParams(track) {
+    const keys = (SAVE_KEYS[track.kind] || []).slice();
+    const out = {};
+    keys.forEach(k => out[k] = track[k]);
+    return out;
+  }
+  function applyPresetToTrack(track, preset) {
+    Object.assign(track, preset);
+    if (track.kind === 'drum') track.voice = DRUM_VOICES[track.voiceType] || DRUM_VOICES.kick;
+  }
+
+  // ---------- shared UI helpers ----------
+  function checkBox(label, val, onChange) {
+    const w = el('label', 'knob');
+    const cb = el('input'); cb.type = 'checkbox'; cb.checked = !!val;
+    cb.addEventListener('change', () => onChange(cb.checked));
+    w.appendChild(cb);
+    w.appendChild(el('span', null, label));
+    return w;
+  }
+
   // ---------- track UI ----------
   function buildTrack(track) {
     const wrap = el('div', 'track');
@@ -2406,13 +2462,63 @@
       });
     } else {
       k.appendChild(group(null,
-        numField('Stp', 1, 64, track.steps, n => { track.steps = n; rebuildSteps(track); }),
+        numField('Stp', 1, 128, track.steps, n => { track.steps = n; rebuildSteps(track); }),
         knob('Vol', 0, 1.2, 0.01, track.volume, v => {
           track.volume = v;
           if (track.volNode) track.volNode.gain.setTargetAtTime(v, audioCtx.currentTime, 0.01);
         }, v => v.toFixed(2)),
         knob('Swg', 0, 0.6, 0.01, track.swing || 0, v => track.swing = v, v => v.toFixed(2)),
+        checkBox('Mono', track.mono, v => { track.mono = v; if (!v) track._lastTrigGain = null; }),
       ));
+      if (PRESET_KINDS.has(track.kind)) {
+        const presetWrap = el('div', 'group');
+        presetWrap.appendChild(el('span', 'label', 'Preset'));
+        const row = el('div', 'group-row');
+        const sel = el('select');
+        sel.className = 'preset-select';
+        const refreshSel = () => {
+          sel.innerHTML = '';
+          const def = el('option', null, '(load…)'); def.value = '';
+          sel.appendChild(def);
+          const presets = getPresetsForKind(track.kind);
+          Object.keys(presets).sort().forEach(n => {
+            const op = el('option', null, n); op.value = n;
+            sel.appendChild(op);
+          });
+        };
+        refreshSel();
+        sel.addEventListener('change', () => {
+          if (!sel.value) return;
+          const presets = getPresetsForKind(track.kind);
+          const p = presets[sel.value];
+          if (!p) return;
+          applyPresetToTrack(track, p);
+          buildKnobs(track);
+        });
+        const saveBtn = el('button', 'mic-btn', 'Save');
+        saveBtn.title = 'save current sound as a preset';
+        saveBtn.addEventListener('click', () => {
+          const name = window.prompt('Save ' + track.kind + ' preset as:', sel.value || '');
+          if (!name) return;
+          setPreset(track.kind, name, getTrackPresetParams(track));
+          refreshSel();
+          sel.value = name;
+        });
+        const delBtn = el('button', 'mic-btn', 'Del');
+        delBtn.title = 'delete the selected preset';
+        delBtn.addEventListener('click', () => {
+          if (!sel.value) return;
+          if (window.confirm('Delete preset "' + sel.value + '"?')) {
+            deletePreset(track.kind, sel.value);
+            refreshSel();
+          }
+        });
+        row.appendChild(sel);
+        row.appendChild(saveBtn);
+        row.appendChild(delBtn);
+        presetWrap.appendChild(row);
+        k.appendChild(presetWrap);
+      }
     }
 
     if (track.kind === 'granular') {
@@ -3214,6 +3320,17 @@
         if (entry && audible) {
           const vel = entry.vel ?? 1;
           const pan = entry.pan ?? 0;
+          // mono: fade out the previous trigger fast so only one voice sounds at a time
+          if (t.mono && t._lastTrigGain) {
+            const g = t._lastTrigGain.gain;
+            const stopAt = t.nextNoteTime;
+            try {
+              g.cancelScheduledValues(stopAt);
+              g.setValueAtTime(g.value, stopAt);
+              g.linearRampToValueAtTime(0.0001, stopAt + 0.005);
+            } catch (e) {}
+            t._lastTrigGain = null;
+          }
           const tg = audioCtx.createGain(); tg.gain.value = vel;
           const tp = audioCtx.createStereoPanner(); tp.pan.value = pan;
           tg.connect(tp).connect(t.input);
@@ -3223,6 +3340,7 @@
             prevSlide: t._prevSlide,
           };
           t.voice(audioCtx, t.nextNoteTime, tg, t, entry, env);
+          if (t.mono) t._lastTrigGain = tg;
           if (i === duckCfg.sourceIndex) triggerDuck(t.nextNoteTime);
         }
         if (entry && (t.kind === 'bass' || t.kind === 'lead')) {
@@ -3575,7 +3693,7 @@
 
   // ---------- save / load ----------
   const SAVE_KEYS = {
-    common: ['name','kind','steps','pattern','volume','mute','solo','armed','group','swing','expanded',
+    common: ['name','kind','steps','pattern','volume','mute','solo','armed','group','swing','mono','expanded',
              'delaySend','reverbSend','chorusSend','flangerSend','bitcrushSend','duckAmt',
              'trkLfoRate','trkLfoShape','trkLfoVolDepth','trkLfoPanDepth'],
     drum:   ['voiceType','tune'],
