@@ -746,6 +746,7 @@
       <div class="module" id="chorus"></div>
       <div class="module" id="flanger"></div>
       <div class="module" id="bitcrush"></div>
+      <div class="module" id="tape"></div>
     </aside>
   </div>
 
@@ -1642,6 +1643,11 @@
   let chorusBus, chorusDelL, chorusDelR, chorusLfoL, chorusLfoR, chorusModL, chorusModR, chorusWet;
   let flangerBus, flangerDel, flangerFb, flangerLfo, flangerMod, flangerWet;
   let bitcrushBus, bitcrushProc, bitcrushWet;
+  let tapeIn, tapeOut, tapeDry, tapeWet, tapeDryDelay;
+  let tapeWowDelay, tapeWowLfo, tapeFlutterLfo, tapeWowDepth, tapeFlutterDepth;
+  let tapeFilterHP, tapeFilterLP, tapeSatNode;
+  let tapeHissSource, tapeHissHP, tapeHissGain;
+  let tapeCrackleSource, tapeCrackleGain;
   const master      = { vol: 0.9, low: 0, mid: 0, high: 0, warmth: 0 };
   const delayCfg    = { time: 0.375, fb: 0.45, wet: 0.5, sync: false, div: '1/4' };
   const DELAY_DIVS = {
@@ -1668,6 +1674,7 @@
   const bitcrushCfg = { bits: 8, normFreq: 0.4, wet: 0.6 };
   const compCfg     = { threshold: -18, ratio: 4, attack: 0.005, release: 0.18, knee: 6 };
   const duckCfg     = { sourceIndex: -1, attack: 0.012, release: 0.22 };
+  const tapeCfg     = { wow: 0, flutter: 0, crackle: 0, hiss: 0, sat: 0, tone: 0, wet: 0 };
   const decks = {
     A: { name: '', vol: 0.8, low: 0, mid: 0, high: 0, playing: false, buffer: null, source: null },
     B: { name: '', vol: 0.8, low: 0, mid: 0, high: 0, playing: false, buffer: null, source: null },
@@ -1684,6 +1691,43 @@
     }
     return ir;
   }
+  // Sparse-impulse buffer used as a vinyl/tape crackle source. Loops forever.
+  function makeCrackleBuffer(ctx) {
+    const len = Math.floor(ctx.sampleRate * 6); // 6s
+    const buf = ctx.createBuffer(1, len, ctx.sampleRate);
+    const data = buf.getChannelData(0);
+    let i = 0;
+    while (i < len) {
+      // exponential wait between impulses, mean ~1500 samples
+      const wait = Math.floor(-Math.log(Math.random() || 0.001) * 1500);
+      i += wait;
+      if (i >= len) break;
+      const amp = (Math.random() * 0.45 + 0.15) * (Math.random() < 0.5 ? -1 : 1);
+      const decay = Math.floor(Math.random() * 28 + 4);
+      for (let j = 0; j < decay && i + j < len; j++) {
+        data[i + j] += amp * Math.exp(-j / 5);
+      }
+      i += decay;
+    }
+    return buf;
+  }
+  // tanh-based tape saturation curve, identity at amount=0
+  function makeTapeSatCurve(amount) {
+    const n = 4096;
+    const curve = new Float32Array(n);
+    if (amount <= 0) {
+      for (let i = 0; i < n; i++) curve[i] = (i / (n - 1)) * 2 - 1;
+      return curve;
+    }
+    const drive = 1 + amount * 4;
+    const norm = Math.tanh(drive);
+    for (let i = 0; i < n; i++) {
+      const x = (i / (n - 1)) * 2 - 1;
+      curve[i] = Math.tanh(x * drive) / norm;
+    }
+    return curve;
+  }
+
   // Hard-ceiling soft-clip curve for a true brick-wall master limiter.
   // Below `knee` the response is linear (no colouration).
   // Between `knee` and `ceiling` the response is a soft tanh shoulder.
@@ -1735,16 +1779,69 @@
     compressor.release.value   = compCfg.release;
     compressor.knee.value      = compCfg.knee;
     // Brick-wall master limiter — WaveShaper with hard ceiling.
-    // Knee at 0.78 (linear below that), tanh shoulder up to ceiling 0.95.
-    // Inputs above ±1.0 are clamped by the node itself, so peaks can never clip.
     masterLimiter = audioCtx.createWaveShaper();
     masterLimiter.curve = makeLimiterCurve(0.78, 0.95);
     masterLimiter.oversample = '4x';
+
+    // ----- Tape emulator (SP-404-style) -----
+    tapeIn       = audioCtx.createGain();
+    tapeOut      = audioCtx.createGain();
+    tapeDry      = audioCtx.createGain(); tapeDry.gain.value = 1 - tapeCfg.wet;
+    tapeWet      = audioCtx.createGain(); tapeWet.gain.value = tapeCfg.wet;
+    // dry path uses a matching ~6 ms delay so it stays in phase with the wet path
+    tapeDryDelay = audioCtx.createDelay(0.05);
+    tapeDryDelay.delayTime.value = 0.006;
+    tapeIn.connect(tapeDryDelay).connect(tapeDry).connect(tapeOut);
+
+    // wet path: wow+flutter delay → tone HP/LP → saturation → wet gain
+    tapeWowDelay = audioCtx.createDelay(0.05);
+    tapeWowDelay.delayTime.value = 0.006;
+    tapeWowLfo     = audioCtx.createOscillator(); tapeWowLfo.type='sine';     tapeWowLfo.frequency.value     = 0.7;
+    tapeFlutterLfo = audioCtx.createOscillator(); tapeFlutterLfo.type='sine'; tapeFlutterLfo.frequency.value = 7;
+    tapeWowDepth     = audioCtx.createGain(); tapeWowDepth.gain.value     = tapeCfg.wow     * 0.004;
+    tapeFlutterDepth = audioCtx.createGain(); tapeFlutterDepth.gain.value = tapeCfg.flutter * 0.0008;
+    tapeWowLfo.connect(tapeWowDepth).connect(tapeWowDelay.delayTime);
+    tapeFlutterLfo.connect(tapeFlutterDepth).connect(tapeWowDelay.delayTime);
+    tapeWowLfo.start();
+    tapeFlutterLfo.start();
+
+    tapeFilterHP = audioCtx.createBiquadFilter(); tapeFilterHP.type='highpass';
+    tapeFilterHP.frequency.value = 20 + tapeCfg.tone * 180;
+    tapeFilterLP = audioCtx.createBiquadFilter(); tapeFilterLP.type='lowpass';
+    tapeFilterLP.frequency.value = 18000 - tapeCfg.tone * 12000;
+
+    tapeSatNode  = audioCtx.createWaveShaper();
+    tapeSatNode.curve = makeTapeSatCurve(tapeCfg.sat);
+    tapeSatNode.oversample = '4x';
+
+    tapeIn.connect(tapeWowDelay)
+          .connect(tapeFilterHP).connect(tapeFilterLP)
+          .connect(tapeSatNode).connect(tapeWet);
+
+    // noise sources, summed into wet
+    tapeHissSource = audioCtx.createBufferSource();
+    tapeHissSource.buffer = getNoise(audioCtx);
+    tapeHissSource.loop = true;
+    tapeHissHP   = audioCtx.createBiquadFilter(); tapeHissHP.type='highpass'; tapeHissHP.frequency.value = 5000;
+    tapeHissGain = audioCtx.createGain(); tapeHissGain.gain.value = tapeCfg.hiss * 0.04;
+    tapeHissSource.connect(tapeHissHP).connect(tapeHissGain).connect(tapeWet);
+    tapeHissSource.start();
+
+    tapeCrackleSource = audioCtx.createBufferSource();
+    tapeCrackleSource.buffer = makeCrackleBuffer(audioCtx);
+    tapeCrackleSource.loop = true;
+    tapeCrackleGain = audioCtx.createGain(); tapeCrackleGain.gain.value = tapeCfg.crackle * 0.3;
+    tapeCrackleSource.connect(tapeCrackleGain).connect(tapeWet);
+    tapeCrackleSource.start();
+
+    tapeWet.connect(tapeOut);
+
     masterOut  = audioCtx.createGain();         masterOut.gain.value = master.vol;
     masterIn.connect(eqLow).connect(eqMid).connect(eqHigh)
             .connect(warmLow).connect(warmHigh).connect(warmShaper)
-            .connect(compressor).connect(masterLimiter)
-            .connect(masterOut).connect(audioCtx.destination);
+            .connect(compressor).connect(tapeIn);
+    tapeOut.connect(masterLimiter)
+           .connect(masterOut).connect(audioCtx.destination);
 
     delayBus  = audioCtx.createGain();
     delayNode = audioCtx.createDelay(2.0); delayNode.delayTime.value = delayCfg.time;
@@ -3287,6 +3384,42 @@
     }, v => (v * 1000).toFixed(0));
   }
 
+  function buildTape() {
+    const m = document.getElementById('tape');
+    m.innerHTML = '';
+    m.appendChild(el('h2', null, 'Tape'));
+    sideRow(m, 'Wow', 0, 1, 0.01, tapeCfg.wow, v => {
+      tapeCfg.wow = v;
+      if (tapeWowDepth) tapeWowDepth.gain.setTargetAtTime(v * 0.004, audioCtx.currentTime, 0.02);
+    }, v => v.toFixed(2));
+    sideRow(m, 'Flut', 0, 1, 0.01, tapeCfg.flutter, v => {
+      tapeCfg.flutter = v;
+      if (tapeFlutterDepth) tapeFlutterDepth.gain.setTargetAtTime(v * 0.0008, audioCtx.currentTime, 0.02);
+    }, v => v.toFixed(2));
+    sideRow(m, 'Crkl', 0, 1, 0.01, tapeCfg.crackle, v => {
+      tapeCfg.crackle = v;
+      if (tapeCrackleGain) tapeCrackleGain.gain.setTargetAtTime(v * 0.3, audioCtx.currentTime, 0.02);
+    }, v => v.toFixed(2));
+    sideRow(m, 'Hiss', 0, 1, 0.01, tapeCfg.hiss, v => {
+      tapeCfg.hiss = v;
+      if (tapeHissGain) tapeHissGain.gain.setTargetAtTime(v * 0.04, audioCtx.currentTime, 0.02);
+    }, v => v.toFixed(2));
+    sideRow(m, 'Sat', 0, 1, 0.01, tapeCfg.sat, v => {
+      tapeCfg.sat = v;
+      if (tapeSatNode) tapeSatNode.curve = makeTapeSatCurve(v);
+    }, v => v.toFixed(2));
+    sideRow(m, 'Tone', 0, 1, 0.01, tapeCfg.tone, v => {
+      tapeCfg.tone = v;
+      if (tapeFilterHP) tapeFilterHP.frequency.setTargetAtTime(20 + v * 180, audioCtx.currentTime, 0.02);
+      if (tapeFilterLP) tapeFilterLP.frequency.setTargetAtTime(18000 - v * 12000, audioCtx.currentTime, 0.02);
+    }, v => v.toFixed(2));
+    sideRow(m, 'Wet', 0, 1, 0.01, tapeCfg.wet, v => {
+      tapeCfg.wet = v;
+      if (tapeDry) tapeDry.gain.setTargetAtTime(1 - v, audioCtx.currentTime, 0.02);
+      if (tapeWet) tapeWet.gain.setTargetAtTime(v, audioCtx.currentTime, 0.02);
+    }, v => v.toFixed(2));
+  }
+
   function buildBitcrush() {
     const m = document.getElementById('bitcrush');
     m.appendChild(el('h2', null, 'Bitcrush'));
@@ -3361,7 +3494,11 @@
             } catch (e) {}
             t._lastTrigGain = null;
           }
-          const tg = audioCtx.createGain(); tg.gain.value = vel;
+          // Per-trigger gain — start from near-zero and ramp to vel over 2 ms so the
+          // trigger boundary itself never produces a click, regardless of voice attack.
+          const tg = audioCtx.createGain();
+          tg.gain.setValueAtTime(0.0001, t.nextNoteTime);
+          tg.gain.exponentialRampToValueAtTime(Math.max(0.0001, vel), t.nextNoteTime + 0.002);
           const tp = audioCtx.createStereoPanner(); tp.pan.value = pan;
           tg.connect(tp).connect(t.input);
           const env = {
@@ -3760,7 +3897,7 @@
       version: 1,
       bpm: parseFloat(bpmInput.value),
       tracks: tracks.map(serializeTrack),
-      master, delayCfg, reverbCfg, chorusCfg, flangerCfg, bitcrushCfg, compCfg, duckCfg,
+      master, delayCfg, reverbCfg, chorusCfg, flangerCfg, bitcrushCfg, compCfg, duckCfg, tapeCfg,
       decks: { A: deckSnap(decks.A), B: deckSnap(decks.B), xfade: decks.xfade },
     };
   }
@@ -3804,6 +3941,15 @@
     if (flangerFb)  flangerFb.gain.value       = flangerCfg.fb;
     if (flangerWet) flangerWet.gain.value      = flangerCfg.wet;
     if (bitcrushWet) bitcrushWet.gain.value    = bitcrushCfg.wet;
+    if (tapeWowDepth)     tapeWowDepth.gain.value     = tapeCfg.wow     * 0.004;
+    if (tapeFlutterDepth) tapeFlutterDepth.gain.value = tapeCfg.flutter * 0.0008;
+    if (tapeCrackleGain)  tapeCrackleGain.gain.value  = tapeCfg.crackle * 0.3;
+    if (tapeHissGain)     tapeHissGain.gain.value     = tapeCfg.hiss    * 0.04;
+    if (tapeSatNode)      tapeSatNode.curve           = makeTapeSatCurve(tapeCfg.sat);
+    if (tapeFilterHP)     tapeFilterHP.frequency.value = 20 + tapeCfg.tone * 180;
+    if (tapeFilterLP)     tapeFilterLP.frequency.value = 18000 - tapeCfg.tone * 12000;
+    if (tapeDry) tapeDry.gain.value = 1 - tapeCfg.wet;
+    if (tapeWet) tapeWet.gain.value = tapeCfg.wet;
     ['A','B'].forEach(k => {
       const d = decks[k];
       if (d.gain)   d.gain.gain.value      = d.vol;
@@ -3815,14 +3961,14 @@
   }
   function rebuildAllUI() {
     tracksEl.innerHTML = '';
-    ['master','comp','ducker','delay','reverb','chorus','flanger','bitcrush','mixer'].forEach(id => {
+    ['master','comp','ducker','delay','reverb','chorus','flanger','bitcrush','tape','mixer'].forEach(id => {
       const node = document.getElementById(id);
       if (node) node.innerHTML = '';
     });
     rebuildTracksUI();
     buildMaster(); buildComp(); buildDucker();
     buildDelay(); buildReverb();
-    buildChorus(); buildFlanger(); buildBitcrush();
+    buildChorus(); buildFlanger(); buildBitcrush(); buildTape();
     buildMixer();
     applyCollapsibles();
   }
@@ -3875,6 +4021,7 @@
     if (data.bitcrushCfg) Object.assign(bitcrushCfg, data.bitcrushCfg);
     if (data.compCfg)     Object.assign(compCfg, data.compCfg);
     if (data.duckCfg)     Object.assign(duckCfg, data.duckCfg);
+    if (data.tapeCfg)     Object.assign(tapeCfg, data.tapeCfg);
     if (data.decks) {
       ['A','B'].forEach(k => {
         if (data.decks[k]) {
@@ -3992,7 +4139,7 @@
     });
   }
   function applyCollapsibles() {
-    ['master','comp','ducker','delay','reverb','chorus','flanger','bitcrush'].forEach(id => {
+    ['master','comp','ducker','delay','reverb','chorus','flanger','bitcrush','tape'].forEach(id => {
       const m = document.getElementById(id);
       if (m) makeCollapsible(m);
     });
@@ -4039,7 +4186,7 @@
   rebuildTracksUI();
   buildMaster(); buildComp(); buildDucker();
   buildDelay(); buildReverb();
-  buildChorus(); buildFlanger(); buildBitcrush();
+  buildChorus(); buildFlanger(); buildBitcrush(); buildTape();
 
   // default: mixer starts collapsed
   document.getElementById('mixer').classList.add('collapsed');
