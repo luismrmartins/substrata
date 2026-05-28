@@ -1636,7 +1636,7 @@
   }
 
   // ---------- audio graph ----------
-  let masterIn, masterOut, eqLow, eqMid, eqHigh, warmLow, warmHigh, warmShaper, compressor;
+  let masterIn, masterOut, eqLow, eqMid, eqHigh, warmLow, warmHigh, warmShaper, compressor, masterLimiter;
   let delayBus, delayNode, delayFb, delayWet;
   let reverbBus, reverbNode, reverbWet;
   let chorusBus, chorusDelL, chorusDelR, chorusLfoL, chorusLfoR, chorusModL, chorusModR, chorusWet;
@@ -1711,10 +1711,18 @@
     compressor.attack.value    = compCfg.attack;
     compressor.release.value   = compCfg.release;
     compressor.knee.value      = compCfg.knee;
+    // brick-wall limiter to catch peak transients (kick + bass on same step etc.)
+    masterLimiter = audioCtx.createDynamicsCompressor();
+    masterLimiter.threshold.value = -0.5;
+    masterLimiter.ratio.value     = 20;
+    masterLimiter.attack.value    = 0.001;
+    masterLimiter.release.value   = 0.05;
+    masterLimiter.knee.value      = 0;
     masterOut  = audioCtx.createGain();         masterOut.gain.value = master.vol;
     masterIn.connect(eqLow).connect(eqMid).connect(eqHigh)
             .connect(warmLow).connect(warmHigh).connect(warmShaper)
-            .connect(compressor).connect(masterOut).connect(audioCtx.destination);
+            .connect(compressor).connect(masterLimiter)
+            .connect(masterOut).connect(audioCtx.destination);
 
     delayBus  = audioCtx.createGain();
     delayNode = audioCtx.createDelay(2.0); delayNode.delayTime.value = delayCfg.time;
