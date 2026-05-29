@@ -554,7 +554,9 @@
   .toggle.eq-on { width: 18px; height: 14px; font-size: 9px; }
 
   /* ---- side ---- */
-  .side { display: flex; flex-direction: column; gap: 22px; }
+  /* NOTE: .side default display is `none` (declared earlier). It is only revealed
+     in `body.mode-effects` via the rule above. Do NOT set a `display` value here
+     or it will leak the effects panel onto the Track and Mix tabs. */
   .side .module h2 { border-bottom: 1px solid var(--line); padding-bottom: 6px; }
   .side .row {
     display: grid;

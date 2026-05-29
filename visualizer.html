@@ -1,0 +1,401 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>substrata · visualizer</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #FDFCF4;
+    --ink: #2A2C2F;
+    --muted: #B3ABA3;
+    --line: #ECE8E3;
+    --accent: #FF5623;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: 'DM Mono', ui-monospace, Menlo, monospace;
+    overflow: hidden;
+    height: 100vh;
+    width: 100vw;
+  }
+  canvas {
+    display: block;
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    z-index: 0;
+  }
+  .title {
+    position: fixed;
+    top: 24px;
+    left: 28px;
+    z-index: 10;
+    font-size: 11px;
+    letter-spacing: 2px;
+    color: var(--muted);
+    text-transform: uppercase;
+    user-select: none;
+  }
+  .title .accent { color: var(--ink); }
+  .vertical {
+    position: fixed;
+    top: 24px;
+    right: 28px;
+    z-index: 10;
+    writing-mode: vertical-rl;
+    font-size: 10px;
+    letter-spacing: 3px;
+    color: var(--muted);
+    text-transform: uppercase;
+    user-select: none;
+  }
+  .controls {
+    position: fixed;
+    bottom: 24px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 10;
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    flex-wrap: wrap;
+    justify-content: center;
+    padding: 10px 18px;
+    background: rgba(253, 252, 244, 0.85);
+    border: 1px solid var(--line);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+  }
+  button {
+    background: transparent;
+    border: 1px solid var(--muted);
+    color: var(--ink);
+    font: inherit;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    padding: 6px 12px;
+    cursor: pointer;
+    transition: all 80ms ease;
+  }
+  button:hover { border-color: var(--ink); }
+  button.on { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+  .status {
+    position: fixed;
+    bottom: 80px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 10;
+    font-size: 10px;
+    color: var(--muted);
+    letter-spacing: 0.5px;
+    text-align: center;
+    pointer-events: none;
+    max-width: 90vw;
+  }
+  .back-link {
+    position: fixed;
+    top: 24px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 10;
+    font-size: 10px;
+    color: var(--muted);
+    text-decoration: none;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+  }
+  .back-link:hover { color: var(--ink); }
+  @media (max-width: 560px) {
+    .title { font-size: 9px; top: 14px; left: 16px; letter-spacing: 1.5px; }
+    .vertical { font-size: 9px; top: 14px; right: 16px; }
+    .back-link { font-size: 9px; top: 14px; }
+    .controls { gap: 6px; padding: 8px 12px; bottom: 16px; }
+    button { font-size: 9px; padding: 5px 8px; }
+    .status { bottom: 70px; font-size: 9px; }
+  }
+</style>
+</head>
+<body>
+<canvas id="canvas"></canvas>
+<div class="title"><span class="accent">substrata</span> · visualizer</div>
+<div class="vertical">武蔵 · 音 · スペクトル</div>
+<a class="back-link" href="/">← Back to substrata</a>
+<div class="status" id="status">Pick an audio source to start the visualizer.</div>
+<div class="controls">
+  <button id="start-tab" title="Listen to another browser tab (recommended)">🖥 Tab Audio</button>
+  <button id="start-mic" title="Listen to microphone">🎤 Mic</button>
+  <button id="fullscreen" title="Toggle full screen">⛶</button>
+</div>
+
+<script>
+(function () {
+  const canvas = document.getElementById('canvas');
+  const ctx = canvas.getContext('2d');
+  const status = document.getElementById('status');
+  const startTabBtn = document.getElementById('start-tab');
+  const startMicBtn = document.getElementById('start-mic');
+  const fullscreenBtn = document.getElementById('fullscreen');
+
+  let audioCtx = null;
+  let analyser = null;
+  let source = null;
+  let stream = null;
+  let timeData = null;
+  let freqData = null;
+  let running = false;
+
+  let phase = 0;          // global animation phase
+  let energyAvg = 0;      // smoothed audio energy
+  let bassAvg = 0;        // smoothed bass energy
+  let midAvg = 0;
+  let highAvg = 0;
+
+  // Reference palette — Musashino-poster magenta gradient.
+  // We'll use HSL space so we can move easily through the pink range.
+  const HUE_BASE = 320;   // pink
+  const HUE_RANGE = 30;   // sweep to magenta/violet
+
+  function resize() {
+    const dpr = Math.max(1, window.devicePixelRatio || 1);
+    const w = window.innerWidth;
+    const h = window.innerHeight;
+    canvas.width = w * dpr;
+    canvas.height = h * dpr;
+    canvas.style.width = w + 'px';
+    canvas.style.height = h + 'px';
+    // Clear to bg on resize so we don't leave artifacts in negative gutter
+    ctx.fillStyle = '#FDFCF4';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+  }
+  window.addEventListener('resize', resize);
+  resize();
+
+  function setStatus(msg) { status.textContent = msg; }
+
+  function stopExistingStream() {
+    if (stream) {
+      try { stream.getTracks().forEach(t => t.stop()); } catch (e) {}
+      stream = null;
+    }
+    if (source) { try { source.disconnect(); } catch (e) {} source = null; }
+  }
+
+  async function startWithStream(newStream, label) {
+    stopExistingStream();
+    stream = newStream;
+    if (!audioCtx) {
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    }
+    if (audioCtx.state === 'suspended') await audioCtx.resume();
+    source = audioCtx.createMediaStreamSource(stream);
+    analyser = audioCtx.createAnalyser();
+    analyser.fftSize = 2048;
+    analyser.smoothingTimeConstant = 0.78;
+    timeData = new Uint8Array(analyser.fftSize);
+    freqData = new Uint8Array(analyser.frequencyBinCount);
+    source.connect(analyser);
+    setStatus('Listening to ' + label + ' — full-screen for the full effect (⛶)');
+    startTabBtn.classList.toggle('on', label === 'tab audio');
+    startMicBtn.classList.toggle('on', label === 'mic');
+    if (!running) { running = true; draw(); }
+  }
+
+  async function startTab() {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) {
+      setStatus('Tab audio capture is only available in Chrome / Edge.');
+      return;
+    }
+    try {
+      const s = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
+      // Drop video tracks — we only need audio
+      s.getVideoTracks().forEach(t => { try { t.stop(); } catch (e) {} s.removeTrack(t); });
+      if (s.getAudioTracks().length === 0) {
+        setStatus('No audio in the shared tab. Make sure to tick "Share tab audio" in the picker.');
+        return;
+      }
+      await startWithStream(s, 'tab audio');
+    } catch (e) {
+      setStatus('Tab capture cancelled or denied.');
+    }
+  }
+  async function startMic() {
+    try {
+      const s = await navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false }
+      });
+      await startWithStream(s, 'mic');
+    } catch (e) {
+      setStatus('Mic access denied.');
+    }
+  }
+  startTabBtn.addEventListener('click', startTab);
+  startMicBtn.addEventListener('click', startMic);
+  fullscreenBtn.addEventListener('click', () => {
+    if (document.fullscreenElement) document.exitFullscreen();
+    else document.documentElement.requestFullscreen().catch(() => {});
+  });
+
+  // ----- main render loop -----
+  function draw() {
+    if (!running) return;
+    requestAnimationFrame(draw);
+
+    const W = canvas.width, H = canvas.height;
+    const dpr = Math.max(1, window.devicePixelRatio || 1);
+
+    // Clear background (warm white). We *don't* fade — we want crisp linework
+    // and let the lines themselves do the temporal movement.
+    ctx.fillStyle = '#FDFCF4';
+    ctx.fillRect(0, 0, W, H);
+
+    if (!analyser) {
+      drawIdleHint(W, H, dpr);
+      return;
+    }
+
+    analyser.getByteFrequencyData(freqData);
+    analyser.getByteTimeDomainData(timeData);
+
+    // Audio band averages — bass / mid / high
+    const binCount = freqData.length;
+    const bassEnd = Math.floor(binCount * 0.08);
+    const midEnd  = Math.floor(binCount * 0.35);
+    let b = 0, m = 0, h = 0, tot = 0;
+    for (let i = 0; i < binCount; i++) {
+      const v = freqData[i];
+      tot += v;
+      if (i < bassEnd) b += v;
+      else if (i < midEnd) m += v;
+      else h += v;
+    }
+    const bassNow = b / (bassEnd * 255);
+    const midNow  = m / ((midEnd - bassEnd) * 255);
+    const highNow = h / ((binCount - midEnd) * 255);
+    const totalNow = tot / (binCount * 255);
+    bassAvg   = bassAvg * 0.85 + bassNow * 0.15;
+    midAvg    = midAvg  * 0.85 + midNow  * 0.15;
+    highAvg   = highAvg * 0.85 + highNow * 0.15;
+    energyAvg = energyAvg * 0.9 + totalNow * 0.1;
+
+    // Phase advances faster on louder material
+    phase += 0.006 + energyAvg * 0.04;
+
+    // Resolution-aware line geometry
+    const lineSpacing = Math.max(1.2 * dpr, Math.min(2.4 * dpr, W / 600));
+    const numLines = Math.floor(W / lineSpacing);
+
+    // Stationary background gradient — Musashino-style depth bottom-right
+    const bgGrad = ctx.createLinearGradient(0, 0, W, H);
+    bgGrad.addColorStop(0, 'rgba(253, 252, 244, 0)');
+    bgGrad.addColorStop(1, 'rgba(214, 51, 176, ' + (0.04 + bassAvg * 0.08).toFixed(3) + ')');
+    ctx.fillStyle = bgGrad;
+    ctx.fillRect(0, 0, W, H);
+
+    // Pre-compute warp amplitudes (subtle vertical curve on each line) from
+    // mid + high. Bass dominates colour intensity.
+    const warpAmp  = (midAvg * 0.6 + highAvg * 0.4) * 18 * dpr;
+    const colorAmp = bassAvg * 1.4 + midAvg * 0.6;
+
+    ctx.lineCap = 'butt';
+
+    for (let i = 0; i < numLines; i++) {
+      const x = i * lineSpacing + lineSpacing * 0.5;
+      const t = i / numLines;
+
+      // Frequency mapping — log-ish so musical notes spread evenly across width
+      const binIdx = Math.floor(Math.pow(t, 1.6) * binCount * 0.55);
+      const freqVal = freqData[binIdx] / 255;
+
+      // Two moving sine fields create the rippling vertical "ridges"
+      const ripple1 = Math.sin(t * Math.PI * 9 + phase) * 0.5 + 0.5;
+      const ripple2 = Math.sin(t * Math.PI * 21 - phase * 1.3) * 0.5 + 0.5;
+      const ripple  = ripple1 * 0.6 + ripple2 * 0.4;
+
+      // Combined intensity: ambient ripple + frequency response + low-end pulse
+      const ambient = 0.16 + ripple * 0.18;
+      const audioIntensity = freqVal * 0.55 + colorAmp * 0.25;
+      const intensity = Math.min(1, ambient + audioIntensity);
+
+      // Pink hue with subtle horizontal drift — sweep across the spectrum
+      const hue = HUE_BASE + ripple * HUE_RANGE - 5;
+      const sat = 70 + intensity * 25;
+      const lit = 72 - intensity * 38;
+      const alpha = 0.22 + intensity * 0.7;
+
+      // Time-domain mapped vertical wave — give each line a subtle curve
+      const waveIdx = Math.floor((i / numLines) * timeData.length);
+      const waveVal = (timeData[waveIdx] - 128) / 128;
+
+      ctx.strokeStyle = 'hsla(' + hue.toFixed(1) + ',' + sat.toFixed(0) + '%,' + lit.toFixed(0) + '%,' + alpha.toFixed(3) + ')';
+      ctx.lineWidth = Math.max(0.6, lineSpacing * 0.55);
+
+      ctx.beginPath();
+      const segments = 14;
+      for (let s = 0; s <= segments; s++) {
+        const yNorm = s / segments;
+        const y = yNorm * H;
+        // Smooth horizontal wave displacement combining LFO and instantaneous waveform
+        const wave = Math.sin(yNorm * Math.PI * 2.2 + phase * 1.1 + i * 0.045) * waveVal * warpAmp;
+        const xOffset = x + wave;
+        if (s === 0) ctx.moveTo(xOffset, y);
+        else ctx.lineTo(xOffset, y);
+      }
+      ctx.stroke();
+    }
+
+    // Subtle highlight band — a soft moving glow inspired by the centre lift
+    // of the reference poster.
+    const glowY = H * (0.55 + Math.sin(phase * 0.4) * 0.06);
+    const glow = ctx.createRadialGradient(W * 0.45, glowY, 0, W * 0.45, glowY, W * 0.35);
+    glow.addColorStop(0, 'rgba(255, 240, 248, ' + (0.18 + highAvg * 0.18).toFixed(3) + ')');
+    glow.addColorStop(1, 'rgba(255, 240, 248, 0)');
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.fillStyle = glow;
+    ctx.fillRect(0, 0, W, H);
+    ctx.globalCompositeOperation = 'source-over';
+  }
+
+  function drawIdleHint(W, H, dpr) {
+    // Soft idle pattern: very faint vertical lines so users see something
+    // before they connect a source.
+    const lineSpacing = 3 * dpr;
+    const numLines = Math.floor(W / lineSpacing);
+    for (let i = 0; i < numLines; i++) {
+      const x = i * lineSpacing + lineSpacing * 0.5;
+      const t = i / numLines;
+      const wave = Math.sin(t * Math.PI * 7 + Date.now() * 0.0008) * 0.5 + 0.5;
+      ctx.strokeStyle = 'hsla(' + (320 + wave * 30) + ',60%,72%,' + (0.06 + wave * 0.10).toFixed(3) + ')';
+      ctx.lineWidth = 0.8 * dpr;
+      ctx.beginPath();
+      ctx.moveTo(x, 0);
+      ctx.lineTo(x, H);
+      ctx.stroke();
+    }
+  }
+
+  // Pre-paint the idle pattern so the page isn't blank on load
+  function idleTick() {
+    if (running) return;
+    const W = canvas.width, H = canvas.height;
+    const dpr = Math.max(1, window.devicePixelRatio || 1);
+    ctx.fillStyle = '#FDFCF4';
+    ctx.fillRect(0, 0, W, H);
+    drawIdleHint(W, H, dpr);
+    requestAnimationFrame(idleTick);
+  }
+  idleTick();
+})();
+</script>
+</body>
+</html>
