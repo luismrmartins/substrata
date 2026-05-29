@@ -363,6 +363,122 @@
     font-size: 11px;
   }
 
+  /* ----- Live mode: two-deck side-by-side live mixer ----- */
+  .live-controls { display: none; }
+  body.mode-live .add-row,
+  body.mode-live .mixer,
+  body.mode-live .steps-row,
+  body.mode-live .track-knobs,
+  body.mode-live .mic-control { display: none !important; }
+  body.mode-live .live-controls {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 24px;
+    margin: 6px 0 18px;
+    padding-bottom: 14px;
+    border-bottom: 1px solid var(--line);
+  }
+  .live-deck-ctrl {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .live-deck-ctrl[data-deck="B"] {
+    border-left: 1px dashed var(--line);
+    padding-left: 24px;
+  }
+  .live-deck-head {
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+  }
+  .live-deck-label {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    color: var(--accent);
+    font-weight: 600;
+  }
+  .live-deck-name {
+    font-size: 10px;
+    color: var(--muted);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .live-deck-btns {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  body.mode-live #tracks {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    column-gap: 24px;
+    align-items: start;
+  }
+  .live-deck-tracks {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-height: 80px;
+  }
+  /* Compact horizontal channel strip — one row per channel for fast live mixing. */
+  body.mode-live .track {
+    display: flex !important;
+    flex-direction: row;
+    align-items: center;
+    border: 1px solid var(--line);
+    border-radius: 3px;
+    padding: 6px 10px;
+    grid-template-columns: unset;
+    overflow: hidden;
+    width: 100%;
+  }
+  body.mode-live .track-meta {
+    display: flex !important;
+    flex-direction: row;
+    align-items: center;
+    gap: 14px;
+    width: 100%;
+  }
+  body.mode-live .track-name {
+    font-size: 12px;
+    font-weight: 500;
+    flex: 1;
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  body.mode-live .track-name .chev { display: none; }
+  body.mode-live .track-name input.name-input {
+    font-size: 12px;
+    width: 100%;
+  }
+  body.mode-live .toggles {
+    display: flex !important;
+    flex-direction: row;
+    flex-wrap: nowrap;
+    gap: 3px;
+    flex-shrink: 0;
+  }
+  body.mode-live .toggle { width: 22px; height: 22px; font-size: 10px; }
+  body.mode-live .master-strip { display: none !important; }
+  body.mode-live .mix-eq-wrap,
+  body.mode-live .mix-strip { display: none !important; }
+  body.mode-live .empty-hint { display: none; }
+  @media (max-width: 720px) {
+    body.mode-live #tracks { grid-template-columns: 1fr; }
+    body.mode-live .live-controls { grid-template-columns: 1fr; }
+    body.mode-live .live-deck-ctrl[data-deck="B"] {
+      border-left: none;
+      padding-left: 0;
+      border-top: 1px dashed var(--line);
+      padding-top: 14px;
+    }
+  }
+
   .track-name input.name-input {
     background: transparent;
     border: none;
@@ -895,6 +1011,7 @@
           <button data-mode="recording" class="on">Track</button>
           <button data-mode="effects">Effects</button>
           <button data-mode="mixing">Mix</button>
+          <button data-mode="live">Live</button>
         </div>
         <button id="folder" class="small" title="set project folder">📁 Folder</button>
         <span id="folder-name" class="folder-name">no folder</span>
@@ -916,6 +1033,32 @@
         <button class="small add-track" data-kind="granular">+ Granular</button>
       </div>
 
+      <div class="live-controls" id="live-controls">
+        <div class="live-deck-ctrl" data-deck="A">
+          <div class="live-deck-head">
+            <span class="live-deck-label">Deck A</span>
+            <span class="live-deck-name" id="live-name-A">— no project loaded —</span>
+          </div>
+          <div class="live-deck-btns">
+            <button class="small" id="live-load-A">Load project →</button>
+            <button class="small" id="live-mute-A" title="Mute every channel on Deck A">Mute all</button>
+            <button class="small" id="live-unmute-A" title="Unmute every channel on Deck A">Unmute all</button>
+            <button class="small" id="live-clear-A" title="Remove all Deck A channels">Clear</button>
+          </div>
+        </div>
+        <div class="live-deck-ctrl" data-deck="B">
+          <div class="live-deck-head">
+            <span class="live-deck-label">Deck B</span>
+            <span class="live-deck-name" id="live-name-B">— no project loaded —</span>
+          </div>
+          <div class="live-deck-btns">
+            <button class="small" id="live-load-B">Load project →</button>
+            <button class="small" id="live-mute-B" title="Mute every channel on Deck B">Mute all</button>
+            <button class="small" id="live-unmute-B" title="Unmute every channel on Deck B">Unmute all</button>
+            <button class="small" id="live-clear-B" title="Remove all Deck B channels">Clear</button>
+          </div>
+        </div>
+      </div>
       <div id="tracks" class="tracks"></div>
       <section class="mixer" id="mixer"></section>
     </main>
@@ -4837,6 +4980,7 @@
   function buildTrack(track) {
     const wrap = el('div', 'track');
     if (track.expanded) wrap.classList.add('expanded');
+    if (track.deck) wrap.dataset.deck = track.deck;
 
     const meta = el('div', 'track-meta');
 
@@ -6388,6 +6532,28 @@
   function rebuildTracksUI() {
     tracksEl.innerHTML = '';
     _masterMeterFill = null;
+
+    if (currentMode === 'live') {
+      // Two-deck layout: per-deck container, channels stack vertically inside.
+      const deckAEl = el('div', 'live-deck-tracks');
+      deckAEl.dataset.deck = 'A';
+      const deckBEl = el('div', 'live-deck-tracks');
+      deckBEl.dataset.deck = 'B';
+      tracksEl.appendChild(deckAEl);
+      tracksEl.appendChild(deckBEl);
+      if (tracks.length === 0) { updateLiveDeckLabels(); return; }
+      tracks.forEach(t => {
+        buildTrack(t);
+        // buildTrack appended the wrap to tracksEl; move it into its deck.
+        const wrap = tracksEl.lastElementChild;
+        if (!wrap || wrap === deckAEl || wrap === deckBEl) return;
+        const target = t.deck === 'B' ? deckBEl : deckAEl;
+        target.appendChild(wrap);
+      });
+      updateLiveDeckLabels();
+      return;
+    }
+
     if (tracks.length === 0) {
       tracksEl.appendChild(el('div', 'empty-hint',
         'No tracks yet — use the "Add track" buttons above to add a Drum, Bass, Synth, Chord, Mic, or Granular channel.'));
@@ -6900,6 +7066,108 @@
       } catch (e) { console.warn('Decode failed for', t.sampleFile, e); }
     }
   }
+  // ---------- Live mode (two-deck live mixing) ----------
+  // Loads two saved projects side-by-side. Each loaded project's tracks are
+  // tagged with their deck (A or B) and appended to the global tracks array
+  // so they all run on the shared transport / scheduler — no pre-rendering.
+  // The user mixes by muting / unmuting channels on each deck.
+  const liveDecks = { A: { projectName: '' }, B: { projectName: '' } };
+
+  function updateLiveDeckLabels() {
+    const a = document.getElementById('live-name-A');
+    const b = document.getElementById('live-name-B');
+    const countA = tracks.filter(t => t.deck === 'A').length;
+    const countB = tracks.filter(t => t.deck === 'B').length;
+    if (a) a.textContent = liveDecks.A.projectName
+      ? (liveDecks.A.projectName + ' · ' + countA + ' channels')
+      : '— no project loaded —';
+    if (b) b.textContent = liveDecks.B.projectName
+      ? (liveDecks.B.projectName + ' · ' + countB + ' channels')
+      : '— no project loaded —';
+  }
+
+  function clearDeck(deck) {
+    for (let i = tracks.length - 1; i >= 0; i--) {
+      if (tracks[i].deck === deck) {
+        destroyTrackAudio(tracks[i]);
+        tracks.splice(i, 1);
+      }
+    }
+    liveDecks[deck].projectName = '';
+    rebuildTracksUI();
+    updateLiveDeckLabels();
+  }
+
+  function loadProjectIntoDeck(data, deck, fileName) {
+    if (!data || !Array.isArray(data.tracks)) {
+      alert('That file does not look like a substrata project.');
+      return;
+    }
+    // Remove existing tracks for this deck
+    for (let i = tracks.length - 1; i >= 0; i--) {
+      if (tracks[i].deck === deck) {
+        destroyTrackAudio(tracks[i]);
+        tracks.splice(i, 1);
+      }
+    }
+    // Build new tracks tagged with the target deck
+    for (const td of data.tracks) {
+      const t = makeTrack(td.kind, td);
+      t.deck = deck;
+      if (t.kind === 'mic') { t.enabled = false; t.stream = null; t.micSource = null; }
+      tracks.push(t);
+      if (audioCtx) initTrackAudio(t);
+    }
+    liveDecks[deck].projectName = fileName || data.name || ('set ' + deck);
+    // First loaded deck dictates BPM; subsequent loads preserve the running tempo.
+    const otherDeck = deck === 'A' ? 'B' : 'A';
+    const otherCount = tracks.filter(t => t.deck === otherDeck).length;
+    if (otherCount === 0 && data.bpm !== undefined) {
+      bpmInput.value = data.bpm;
+      bpmInput.dispatchEvent(new Event('input'));
+    }
+    applyAllParams();
+    rebuildTracksUI();
+    if (projectDir) reloadGranularSamples();
+    updateLiveDeckLabels();
+  }
+
+  function openDeckLoadDialog(deck) {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.json,application/json';
+    input.addEventListener('change', () => {
+      const file = input.files && input.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = () => {
+        try { loadProjectIntoDeck(JSON.parse(reader.result), deck, file.name); }
+        catch (e) { alert('Failed to load: ' + e.message); }
+      };
+      reader.readAsText(file);
+    });
+    input.click();
+  }
+
+  function setDeckMute(deck, muted) {
+    for (const t of tracks) {
+      if (t.deck === deck) setMuteAcross(t, muted, false);
+    }
+    rebuildTracksUI();
+  }
+
+  ['A','B'].forEach(d => {
+    const loadBtn   = document.getElementById('live-load-' + d);
+    const muteBtn   = document.getElementById('live-mute-' + d);
+    const unmuteBtn = document.getElementById('live-unmute-' + d);
+    const clearBtn  = document.getElementById('live-clear-' + d);
+    if (loadBtn)   loadBtn.addEventListener('click',   () => openDeckLoadDialog(d));
+    if (muteBtn)   muteBtn.addEventListener('click',   () => setDeckMute(d, true));
+    if (unmuteBtn) unmuteBtn.addEventListener('click', () => setDeckMute(d, false));
+    if (clearBtn)  clearBtn.addEventListener('click',  () => clearDeck(d));
+  });
+  updateLiveDeckLabels();
+
   function openLoadDialog() {
     const input = document.createElement('input');
     input.type = 'file';
@@ -7022,10 +7290,15 @@
   modeBtns.forEach(btn => {
     btn.addEventListener('click', () => {
       const mode = btn.dataset.mode;
+      const oldMode = currentMode;
       currentMode = mode;
       document.body.classList.toggle('mode-mixing',  mode === 'mixing');
       document.body.classList.toggle('mode-effects', mode === 'effects');
+      document.body.classList.toggle('mode-live',    mode === 'live');
       modeBtns.forEach(b => b.classList.toggle('on', b === btn));
+      // Live mode uses a different DOM layout (per-deck containers) — rebuild
+      // when crossing the boundary so the structure matches.
+      if (mode === 'live' || oldMode === 'live') rebuildTracksUI();
     });
   });
 
