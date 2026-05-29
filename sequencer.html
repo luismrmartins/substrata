@@ -1337,6 +1337,7 @@
         <button class="small add-track" data-kind="drum">+ Drum</button>
         <button class="small add-track" data-kind="bass">+ Bass</button>
         <button class="small add-track" data-kind="lead">+ Synth</button>
+        <button class="small add-track" data-kind="sh101">+ SH-101</button>
         <button class="small add-track" data-kind="chord">+ Chord</button>
         <button class="small add-track" data-kind="mellotron">+ Mellotron</button>
         <button class="small add-track" data-kind="mic">+ Mic</button>
@@ -1724,6 +1725,106 @@
     sub.start(t); sub.stop(off);
     sin.start(t); sin.stop(off);
     saw.start(t); saw.stop(off);
+  }
+
+  // -------- vSh101 — Roland-SH-101-inspired mono synth --------
+  // Single VCO with simultaneously-available pulse + saw + sub (-1 / -2 oct
+  // square) + noise. 24 dB/oct lowpass (two cascaded LP biquads) with its own
+  // ADSR and bipolar env amount. Separate VCA ADSR. LFO (sine/tri/sq/saw)
+  // routes to pitch and cutoff. Portamento via the existing slide flag.
+  function vSh101(ctx, t, out, tr, step, env) {
+    const offset  = step.pitch || 0;
+    const target  = midiToFreq(tr.root + offset);
+    const slide   = env && env.prevSlide && env.prevFreq;
+    const stepDur = env.stepDur;
+    const stepLen = (step && step.length != null) ? step.length : 1.0;
+    const holdEnd = t + stepDur * stepLen;
+    const off     = holdEnd + Math.max(tr.release, tr.fRelease, 0.1) + 0.15;
+
+    // VCO — pulse (PWM-tuneable), saw, sub square, noise
+    const pulse = createOsc(ctx, 'pulse', tr.pulseWidth);
+    const saw   = ctx.createOscillator(); saw.type = 'sawtooth';
+    const sub   = ctx.createOscillator(); sub.type = 'square';
+    const noise = ctx.createBufferSource(); noise.buffer = getNoise(ctx); noise.loop = true;
+    const subMul = tr.subOctave === -2 ? 0.25 : 0.5;
+    applyOscFreq(pulse, target,         t, slide ? env.prevFreq         : null);
+    applyOscFreq(saw,   target,         t, slide ? env.prevFreq         : null);
+    applyOscFreq(sub,   target * subMul, t, slide ? env.prevFreq * subMul : null);
+
+    const pulseG = ctx.createGain(); pulseG.gain.value = tr.pulseLevel;
+    const sawG   = ctx.createGain(); sawG.gain.value   = tr.sawLevel;
+    const subG   = ctx.createGain(); subG.gain.value   = tr.subLevel;
+    const noiseG = ctx.createGain(); noiseG.gain.value = tr.noiseLevel;
+    const mix    = ctx.createGain(); mix.gain.value    = 0.45;
+    pulse.connect(pulseG).connect(mix);
+    saw.connect(sawG).connect(mix);
+    sub.connect(subG).connect(mix);
+    noise.connect(noiseG).connect(mix);
+
+    // 24 dB/oct lowpass = two cascaded BiquadFilter lowpass nodes. First
+    // stage carries the resonance, second stage is gentle to avoid a double
+    // resonance peak.
+    const f1 = ctx.createBiquadFilter(); f1.type = 'lowpass'; f1.Q.value = tr.reso;
+    const f2 = ctx.createBiquadFilter(); f2.type = 'lowpass'; f2.Q.value = 0.5;
+
+    // Filter envelope — bipolar env amount: positive sweeps cutoff up at the
+    // attack, negative would sweep down. fSustain (0..1) interpolates between
+    // baseCut and peakCut for the hold phase.
+    const baseCut = Math.max(40, tr.cutoff);
+    const envOctaves = tr.fEnvAmt * 5;
+    const peakCut = clamp(baseCut * Math.pow(2, envOctaves), 40, 18000);
+    const sustainCut = clamp(baseCut * Math.pow(2, envOctaves * tr.fSustain), 40, 18000);
+    const setFilterEnv = (node, scale) => {
+      const peakS = clamp(peakCut * scale, 40, 18000);
+      const susS  = clamp(sustainCut * scale, 40, 18000);
+      const baseS = clamp(baseCut * scale, 40, 18000);
+      node.frequency.setValueAtTime(baseS, t);
+      node.frequency.exponentialRampToValueAtTime(peakS, t + Math.max(0.001, tr.fAttack));
+      node.frequency.exponentialRampToValueAtTime(susS, t + tr.fAttack + Math.max(0.005, tr.fDecay));
+      node.frequency.setValueAtTime(susS, holdEnd);
+      node.frequency.exponentialRampToValueAtTime(baseS, holdEnd + Math.max(0.01, tr.fRelease));
+    };
+    setFilterEnv(f1, 1);
+    setFilterEnv(f2, 1.15);
+
+    // VCA ADSR
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.linearRampToValueAtTime(1, t + Math.max(0.001, tr.attack));
+    g.gain.linearRampToValueAtTime(Math.max(0.0001, tr.sustain), t + tr.attack + Math.max(0.001, tr.decay));
+    g.gain.setValueAtTime(Math.max(0.0001, tr.sustain), holdEnd);
+    g.gain.linearRampToValueAtTime(0.0001, holdEnd + Math.max(0.005, tr.release));
+
+    // LFO — to pitch, cutoff
+    if (tr.lfoVCO > 0 || tr.lfoVCF > 0) {
+      const lfo = ctx.createOscillator();
+      lfo.type = tr.lfoShape || 'triangle';
+      lfo.frequency.value = tr.lfoRate;
+      lfo.start(t); lfo.stop(off);
+      if (tr.lfoVCO > 0) {
+        const pg = ctx.createGain(); pg.gain.value = tr.lfoVCO * 100;
+        lfo.connect(pg);
+        pg.connect(pulse.detune); pg.connect(saw.detune); pg.connect(sub.detune);
+      }
+      if (tr.lfoVCF > 0) {
+        const cg1 = ctx.createGain(); cg1.gain.value = tr.lfoVCF * 3000;
+        const cg2 = ctx.createGain(); cg2.gain.value = tr.lfoVCF * 3000;
+        lfo.connect(cg1).connect(f1.frequency);
+        lfo.connect(cg2).connect(f2.frequency);
+      }
+    }
+
+    // Per-voice soft limiter — reuse the bass curve (knee 0.45 / ceiling 0.7).
+    const limit = ctx.createWaveShaper();
+    limit.curve = getBassLimitCurve(ctx);
+    limit.oversample = '4x';
+
+    mix.connect(f1).connect(f2).connect(g).connect(limit).connect(out);
+
+    pulse.start(t); pulse.stop(off);
+    saw.start(t);   saw.stop(off);
+    sub.start(t);   sub.stop(off);
+    noise.start(t); noise.stop(off);
   }
 
   // ---------- chord ----------
@@ -3113,6 +3214,19 @@
           lfoCut: 0, lfoRes: 0, lfoPitch: 0, lfoAmp: 0, lfoEnv: 0,
         };
         break;
+      case 'sh101':
+        // Roland-SH-101-inspired mono synth.
+        specific = {
+          voice: vSh101, root: 36,
+          pulseLevel: 0.7, sawLevel: 0.5, subLevel: 0.5, noiseLevel: 0,
+          pulseWidth: 0.5, subOctave: -1,
+          cutoff: 1200, reso: 6, fEnvAmt: 0.5,
+          fAttack: 0.001, fDecay: 0.25, fSustain: 0.0, fRelease: 0.12,
+          attack: 0.005, decay: 0.18, sustain: 0.3, release: 0.15,
+          lfoRate: 4, lfoShape: 'triangle',
+          lfoVCO: 0, lfoVCF: 0,
+        };
+        break;
       case 'lead':
         specific = {
           voice: vLead, root: 60,
@@ -3187,6 +3301,7 @@
     if (t.kind === 'drum')   t.voice = DRUM_VOICES[t.voiceType] || DRUM_VOICES.kick;
     if (t.kind === 'bass')   t.voice = vBass;
     if (t.kind === 'lead')   t.voice = vLead;
+    if (t.kind === 'sh101')  t.voice = vSh101;
     if (t.kind === 'chord')  t.voice = vChord;
     if (t.kind === 'granular') t.voice = vGranular;
     if (t.kind === 'mellotron') t.voice = vMellotron;
@@ -3954,7 +4069,7 @@
     for (let i = 0; i < track.steps; i++) {
       if (Math.random() < density) {
         const entry = defaultEntry(track);
-        if (track.kind === 'bass' || track.kind === 'lead') {
+        if (track.kind === 'bass' || track.kind === 'lead' || track.kind === 'sh101') {
           const scaleSemis = [0, 2, 3, 5, 7, 8, 10, 12];
           entry.pitch = scaleSemis[Math.floor(Math.random() * scaleSemis.length)];
           if (Math.random() < 0.25) entry.slide = true;
@@ -5214,6 +5329,71 @@
         lfoCut: 0, lfoRes: 0, lfoPitch: 0, lfoAmp: 0, lfoEnv: 0,
       },
     },
+    sh101: {
+      'Bassline':  {
+        root: 36,
+        pulseLevel: 0, sawLevel: 0.9, subLevel: 0.6, noiseLevel: 0,
+        pulseWidth: 0.5, subOctave: -1,
+        cutoff: 350, reso: 8, fEnvAmt: 0.7,
+        fAttack: 0.001, fDecay: 0.22, fSustain: 0.0, fRelease: 0.12,
+        attack: 0.001, decay: 0.12, sustain: 0.0, release: 0.10,
+        lfoRate: 4, lfoShape: 'triangle', lfoVCO: 0, lfoVCF: 0,
+      },
+      'Acid Squelch': {
+        root: 36,
+        pulseLevel: 0, sawLevel: 1.0, subLevel: 0.2, noiseLevel: 0,
+        pulseWidth: 0.5, subOctave: -1,
+        cutoff: 280, reso: 18, fEnvAmt: 0.85,
+        fAttack: 0.001, fDecay: 0.20, fSustain: 0.0, fRelease: 0.08,
+        attack: 0.001, decay: 0.10, sustain: 0.0, release: 0.06,
+        lfoRate: 4, lfoShape: 'triangle', lfoVCO: 0, lfoVCF: 0,
+      },
+      'Sub Boom': {
+        root: 36,
+        pulseLevel: 0, sawLevel: 0, subLevel: 1.0, noiseLevel: 0,
+        pulseWidth: 0.5, subOctave: -2,
+        cutoff: 220, reso: 1, fEnvAmt: 0.0,
+        fAttack: 0.001, fDecay: 0.30, fSustain: 0.0, fRelease: 0.20,
+        attack: 0.005, decay: 0.20, sustain: 0.85, release: 0.35,
+        lfoRate: 4, lfoShape: 'triangle', lfoVCO: 0, lfoVCF: 0,
+      },
+      'Pulse Pluck': {
+        root: 48,
+        pulseLevel: 0.9, sawLevel: 0, subLevel: 0.4, noiseLevel: 0,
+        pulseWidth: 0.30, subOctave: -1,
+        cutoff: 1800, reso: 4, fEnvAmt: 0.45,
+        fAttack: 0.001, fDecay: 0.20, fSustain: 0.0, fRelease: 0.18,
+        attack: 0.001, decay: 0.15, sustain: 0.0, release: 0.14,
+        lfoRate: 4, lfoShape: 'triangle', lfoVCO: 0, lfoVCF: 0,
+      },
+      'Hollow Lead': {
+        root: 60,
+        pulseLevel: 0.8, sawLevel: 0.0, subLevel: 0.3, noiseLevel: 0,
+        pulseWidth: 0.12, subOctave: -1,
+        cutoff: 4000, reso: 2, fEnvAmt: 0.2,
+        fAttack: 0.005, fDecay: 0.30, fSustain: 0.55, fRelease: 0.25,
+        attack: 0.005, decay: 0.20, sustain: 0.75, release: 0.30,
+        lfoRate: 5, lfoShape: 'triangle', lfoVCO: 0.04, lfoVCF: 0,
+      },
+      'Saw Lead': {
+        root: 60,
+        pulseLevel: 0, sawLevel: 1.0, subLevel: 0.35, noiseLevel: 0,
+        pulseWidth: 0.5, subOctave: -1,
+        cutoff: 5500, reso: 5, fEnvAmt: 0.35,
+        fAttack: 0.002, fDecay: 0.40, fSustain: 0.6, fRelease: 0.30,
+        attack: 0.003, decay: 0.25, sustain: 0.8, release: 0.35,
+        lfoRate: 5, lfoShape: 'sine', lfoVCO: 0.03, lfoVCF: 0,
+      },
+      'Pad':      {
+        root: 48,
+        pulseLevel: 0.5, sawLevel: 0.5, subLevel: 0.4, noiseLevel: 0.05,
+        pulseWidth: 0.5, subOctave: -1,
+        cutoff: 3200, reso: 1, fEnvAmt: 0.25,
+        fAttack: 0.6, fDecay: 0.8, fSustain: 0.8, fRelease: 1.2,
+        attack: 0.5, decay: 0.6, sustain: 0.9, release: 1.5,
+        lfoRate: 0.4, lfoShape: 'sine', lfoVCO: 0.02, lfoVCF: 0.1,
+      },
+    },
     drum: {
       'TR-808': {
         'Boomy Kick':       { voiceType: '808 Kick',   tune: -3 },
@@ -5980,6 +6160,44 @@
       ));
     }
 
+    if (track.kind === 'sh101') {
+      k.appendChild(group('VCO',
+        numField('Root', 24, 72, track.root, n => track.root = n),
+        knob('Pul', 0, 1, 0.01, track.pulseLevel, v => track.pulseLevel = v, v => v.toFixed(2)),
+        knob('Saw', 0, 1, 0.01, track.sawLevel,   v => track.sawLevel   = v, v => v.toFixed(2)),
+        knob('Sub', 0, 1, 0.01, track.subLevel,   v => track.subLevel   = v, v => v.toFixed(2)),
+        knob('Nse', 0, 1, 0.01, track.noiseLevel, v => track.noiseLevel = v, v => v.toFixed(2)),
+        knob('PW',  0.05, 0.95, 0.01, track.pulseWidth, v => track.pulseWidth = v, v => v.toFixed(2)),
+        selectField('SubO', ['-1','-2'], String(track.subOctave),
+          v => track.subOctave = parseInt(v, 10)),
+      ));
+      k.appendChild(group('VCF',
+        knob('Cut',  40, 18000, 10, track.cutoff, v => track.cutoff = v, v => Math.round(v)),
+        knob('Res',  0.1, 25,   0.1, track.reso,   v => track.reso   = v, v => v.toFixed(1)),
+        knob('Env',  -1, 1,    0.01, track.fEnvAmt, v => track.fEnvAmt = v, v => (v >= 0 ? '+' : '') + v.toFixed(2)),
+      ));
+      k.appendChild(group('F-Env',
+        knob('A', 0.001, 1.0, 0.001, track.fAttack,  v => track.fAttack  = v, v => v.toFixed(3)),
+        knob('D', 0.01,  2.0, 0.01,  track.fDecay,   v => track.fDecay   = v, v => v.toFixed(2)),
+        knob('S', 0,     1,   0.01,  track.fSustain, v => track.fSustain = v, v => v.toFixed(2)),
+        knob('R', 0.01,  2.5, 0.01,  track.fRelease, v => track.fRelease = v, v => v.toFixed(2)),
+      ));
+      k.appendChild(group('A-Env',
+        knob('A', 0.001, 1.0, 0.001, track.attack,  v => track.attack  = v, v => v.toFixed(3)),
+        knob('D', 0.01,  2.0, 0.01,  track.decay,   v => track.decay   = v, v => v.toFixed(2)),
+        knob('S', 0,     1,   0.01,  track.sustain, v => track.sustain = v, v => v.toFixed(2)),
+        knob('R', 0.01,  2.5, 0.01,  track.release, v => track.release = v, v => v.toFixed(2)),
+      ));
+      k.appendChild(group('LFO',
+        knob('Rate', 0.05, 30, 0.05, track.lfoRate, v => track.lfoRate = v, v => v.toFixed(2)),
+        selectField('Shp',  ['sine','triangle','square','sawtooth'], track.lfoShape, v => track.lfoShape = v),
+      ));
+      k.appendChild(group('LFO→',
+        knob('VCO', 0, 1, 0.01, track.lfoVCO, v => track.lfoVCO = v, v => v.toFixed(2)),
+        knob('VCF', 0, 1, 0.01, track.lfoVCF, v => track.lfoVCF = v, v => v.toFixed(2)),
+      ));
+    }
+
     if (track.kind === 'chord') {
       k.appendChild(group('Scale',
         selectField('Scale', Object.keys(SCALES), track.scale, v => { track.scale = v; rebuildSteps(track); }),
@@ -6209,7 +6427,7 @@
       let velRef = null, panRef = null, lenRef = null;
 
       cell.addEventListener('click', (e) => {
-        if ((track.kind === 'bass' || track.kind === 'lead') && e.shiftKey) {
+        if ((track.kind === 'bass' || track.kind === 'lead' || track.kind === 'sh101') && e.shiftKey) {
           if (track.pattern[i]) {
             track.pattern[i].slide = !track.pattern[i].slide;
             renderStep(cell, track, i);
@@ -6223,7 +6441,7 @@
         if (lenRef) renderLane(lenRef, track, i, 'length');
       });
 
-      if (track.kind === 'bass' || track.kind === 'lead' || track.kind === 'granular' || track.kind === 'mellotron') {
+      if (track.kind === 'bass' || track.kind === 'lead' || track.kind === 'sh101' || track.kind === 'granular' || track.kind === 'mellotron') {
         cell.addEventListener('wheel', (e) => {
           if (!track.pattern[i]) return;
           e.preventDefault();
@@ -6244,7 +6462,7 @@
 
       col.appendChild(cell);
 
-      if (track.kind === 'bass' || track.kind === 'lead') {
+      if (track.kind === 'bass' || track.kind === 'lead' || track.kind === 'sh101') {
         const ctrl = el('div', 'step-mini');
         const dn = el('button', null, '−');
         const up = el('button', null, '+');
@@ -6351,7 +6569,7 @@
   function defaultEntry(track) {
     const base = { vel: 1, pan: 0 };
     const len = track.noteLen != null ? track.noteLen : 1.0;
-    if (track.kind === 'bass' || track.kind === 'lead') return { ...base, pitch: 0, slide: false, length: len };
+    if (track.kind === 'bass' || track.kind === 'lead' || track.kind === 'sh101') return { ...base, pitch: 0, slide: false, length: len };
     if (track.kind === 'granular') return { ...base, pitch: 0, length: len };
     if (track.kind === 'mellotron') return { ...base, pitch: 0, length: len };
     if (track.kind === 'chord') return { ...base, degree: 0, quality: 'auto', length: len };
@@ -6367,7 +6585,7 @@
     const on = !!track.pattern[i];
     cell.classList.toggle('on', on);
     cell.classList.toggle('slide', on && track.pattern[i].slide);
-    if (on && (track.kind === 'bass' || track.kind === 'lead' || track.kind === 'granular' || track.kind === 'mellotron')) {
+    if (on && (track.kind === 'bass' || track.kind === 'lead' || track.kind === 'sh101' || track.kind === 'granular' || track.kind === 'mellotron')) {
       cell.textContent = String(track.pattern[i].pitch);
     } else if (on && track.kind === 'chord') {
       const numerals = ['I','II','III','IV','V','VI','VII'];
@@ -7108,7 +7326,7 @@
           if (t.mono) t._lastTrigGain = tg;
           if (i === duckCfg.sourceIndex) triggerDuck(t.nextNoteTime);
         }
-        if (entry && (t.kind === 'bass' || t.kind === 'lead')) {
+        if (entry && (t.kind === 'bass' || t.kind === 'lead' || t.kind === 'sh101')) {
           t._prevFreq  = midiToFreq(t.root + (entry.pitch || 0));
           t._prevSlide = !!entry.slide;
         }
@@ -7198,10 +7416,11 @@
     t.chorusSendN  = audioCtx.createGain();   t.chorusSendN.gain.value  = t.chorusSend;
     t.flangerSendN = audioCtx.createGain();   t.flangerSendN.gain.value = t.flangerSend;
     t.bitcrushSendN= audioCtx.createGain();   t.bitcrushSendN.gain.value= t.bitcrushSend;
-    // Bass channels get a fast hard limiter at the very end of the channel
-    // strip — catches anything the per-voice cap missed plus user vol/EQ
-    // hot-spots, so the bass can't clip into the master no matter what.
-    if (t.kind === 'bass') {
+    // Bass + SH-101 channels get a fast hard limiter at the very end of the
+    // channel strip — catches anything the per-voice cap missed plus user
+    // vol/EQ hot-spots, so the low end can't clip into the master no matter
+    // what.
+    if (t.kind === 'bass' || t.kind === 'sh101') {
       t.bassLimiter = audioCtx.createDynamicsCompressor();
       t.bassLimiter.threshold.value = -8;
       t.bassLimiter.ratio.value     = 15;
@@ -7544,7 +7763,7 @@
         tg.connect(tp).connect(input);
         const env = { stepDur, prevFreq, prevSlide };
         try { t.voice(offline, time, tg, t, entry, env); } catch (e) { /* skip */ }
-        if (t.kind === 'bass' || t.kind === 'lead') {
+        if (t.kind === 'bass' || t.kind === 'lead' || t.kind === 'sh101') {
           prevFreq = midiToFreq(t.root + (entry.pitch || 0));
           prevSlide = !!entry.slide;
         }
@@ -7645,6 +7864,12 @@
     bass:   ['root','wave','subLevel','sinLevel','sawLevel','cutoff','reso','env','fDecay',
              'attack','decay','sustain','release',
              'lfoRate','lfoShape','lfoCut','lfoRes','lfoPitch','lfoAmp','lfoEnv'],
+    sh101:  ['root',
+             'pulseLevel','sawLevel','subLevel','noiseLevel','pulseWidth','subOctave',
+             'cutoff','reso','fEnvAmt',
+             'fAttack','fDecay','fSustain','fRelease',
+             'attack','decay','sustain','release',
+             'lfoRate','lfoShape','lfoVCO','lfoVCF'],
     lead:   ['root',
              'waveA','octA','tuneA','pwA',
              'waveB','octB','tuneB','detuneB','pwB',
