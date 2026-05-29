@@ -1625,6 +1625,15 @@
   }
 
   // ---------- bass ----------
+  // Cached soft-limit curve for the bass voice — keeps the three-oscillator
+  // sum plus the resonant low-pass peak from ever exceeding ~0.85, so a hot
+  // bass note can't push the master limiter into audible clipping.
+  let _bassLimitCurve = null;
+  function getBassLimitCurve(ctx) {
+    if (!_bassLimitCurve) _bassLimitCurve = makeLimiterCurve(0.55, 0.85);
+    return _bassLimitCurve;
+  }
+
   function vBass(ctx, t, out, tr, step, env) {
     const offset  = step.pitch || 0;
     const target  = midiToFreq(tr.root + offset);
@@ -1645,10 +1654,17 @@
     const subG = ctx.createGain(); subG.gain.value = tr.subLevel;
     const sinG = ctx.createGain(); sinG.gain.value = tr.sinLevel;
     const sawG = ctx.createGain(); sawG.gain.value = tr.sawLevel;
-    const mix  = ctx.createGain(); mix.gain.value = 0.7;
+    // Headroom for the three-oscillator sum before the resonant filter — was
+    // 0.7, lowered to 0.55 so high subLevel + high reso doesn't push past 0 dB.
+    const mix  = ctx.createGain(); mix.gain.value = 0.55;
     sub.connect(subG).connect(mix);
     sin.connect(sinG).connect(mix);
     saw.connect(sawG).connect(mix);
+
+    // Per-voice soft limiter — catches anything the headroom and ADSR didn't.
+    const limit = ctx.createWaveShaper();
+    limit.curve = getBassLimitCurve(ctx);
+    limit.oversample = '4x';
 
     const f = ctx.createBiquadFilter(); f.type='lowpass'; f.Q.value = tr.reso;
     const peak = Math.min(18000, tr.cutoff * (1 + tr.env * 12));
@@ -1679,9 +1695,9 @@
       lfo.connect(ag).connect(trem.gain);
       dc.connect(trem.gain);
       dc.start(t); dc.stop(off);
-      mix.connect(trem).connect(f).connect(g).connect(out);
+      mix.connect(trem).connect(f).connect(g).connect(limit).connect(out);
     } else {
-      mix.connect(f).connect(g).connect(out);
+      mix.connect(f).connect(g).connect(limit).connect(out);
     }
 
     if (anyLFO) {
