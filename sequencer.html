@@ -1626,11 +1626,11 @@
 
   // ---------- bass ----------
   // Cached soft-limit curve for the bass voice — keeps the three-oscillator
-  // sum plus the resonant low-pass peak from ever exceeding ~0.85, so a hot
-  // bass note can't push the master limiter into audible clipping.
+  // sum plus the resonant low-pass peak from ever exceeding ~0.7. Paired
+  // with the per-channel bass compressor in initTrackAudio.
   let _bassLimitCurve = null;
   function getBassLimitCurve(ctx) {
-    if (!_bassLimitCurve) _bassLimitCurve = makeLimiterCurve(0.55, 0.85);
+    if (!_bassLimitCurve) _bassLimitCurve = makeLimiterCurve(0.45, 0.7);
     return _bassLimitCurve;
   }
 
@@ -7198,13 +7198,28 @@
     t.chorusSendN  = audioCtx.createGain();   t.chorusSendN.gain.value  = t.chorusSend;
     t.flangerSendN = audioCtx.createGain();   t.flangerSendN.gain.value = t.flangerSend;
     t.bitcrushSendN= audioCtx.createGain();   t.bitcrushSendN.gain.value= t.bitcrushSend;
+    // Bass channels get a fast hard limiter at the very end of the channel
+    // strip — catches anything the per-voice cap missed plus user vol/EQ
+    // hot-spots, so the bass can't clip into the master no matter what.
+    if (t.kind === 'bass') {
+      t.bassLimiter = audioCtx.createDynamicsCompressor();
+      t.bassLimiter.threshold.value = -8;
+      t.bassLimiter.ratio.value     = 15;
+      t.bassLimiter.attack.value    = 0.001;
+      t.bassLimiter.release.value   = 0.06;
+      t.bassLimiter.knee.value      = 3;
+    }
     // Meter analyser (cheap, parallel observer after vol/EQ)
     t.trkMeter = audioCtx.createAnalyser();
     t.trkMeter.fftSize = 256;
     t.input.connect(t.deckGainN).connect(t.volNode);
     t.volNode.connect(t.trkLfoMod).connect(t.trkPanNode)
-             .connect(t.trkEqLow).connect(t.trkEqMid).connect(t.trkEqHigh)
-             .connect(t.duckGain);
+             .connect(t.trkEqLow).connect(t.trkEqMid).connect(t.trkEqHigh);
+    if (t.bassLimiter) {
+      t.trkEqHigh.connect(t.bassLimiter).connect(t.duckGain);
+    } else {
+      t.trkEqHigh.connect(t.duckGain);
+    }
     t.duckGain.connect(t.trkMeter);
     t.duckGain.connect(deckBusInputFor(t.deck));
     t.duckGain.connect(t.delaySendN).connect(delayBus);
@@ -7250,7 +7265,7 @@
     if (t._scopeStop !== undefined) t._scopeStop = true;
     if (t.trkLfo) { try { t.trkLfo.stop(); } catch (e) {} try { t.trkLfo.disconnect(); } catch (e) {} t.trkLfo = null; }
     ['trkLfoVolG','trkLfoPanG','trkLfoMod','trkPanNode','trkEqLow','trkEqMid','trkEqHigh','trkMeter',
-     'micSource','inputGainN','hpf','micGate','analyser','input','deckGainN','volNode','duckGain',
+     'micSource','inputGainN','hpf','micGate','analyser','input','deckGainN','volNode','duckGain','bassLimiter',
      'delaySendN','reverbSendN','chorusSendN','flangerSendN','bitcrushSendN']
       .forEach(k => { if (t[k]) { try { t[k].disconnect(); } catch (e) {} t[k] = null; } });
     if (t.eqNodes) { t.eqNodes.forEach(n => { try { n.disconnect(); } catch (e) {} }); t.eqNodes = null; }
