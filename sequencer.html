@@ -450,6 +450,97 @@
     grid-template-columns: 1fr 1fr;
     gap: 24px;
   }
+  /* Cue — stage multiple projects, then send each to Deck A or Deck B */
+  .live-cue {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid var(--line);
+  }
+  .live-cue.drag-over {
+    background: rgba(255, 86, 35, 0.06);
+    border-radius: 4px;
+  }
+  .live-cue-head {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .live-cue-label {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    color: var(--accent);
+    font-weight: 600;
+  }
+  .live-cue-count {
+    font-size: 10px;
+    color: var(--muted);
+  }
+  .live-cue-btns {
+    display: flex;
+    gap: 6px;
+    margin-left: auto;
+  }
+  .live-cue-list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .live-cue-empty {
+    font-size: 10px;
+    color: var(--muted);
+    padding: 10px 0;
+    text-align: center;
+    border: 1px dashed var(--line);
+    border-radius: 3px;
+  }
+  .live-cue-item {
+    display: grid;
+    grid-template-columns: 1fr auto auto auto auto;
+    align-items: center;
+    column-gap: 6px;
+    padding: 5px 8px;
+    border: 1px solid var(--line);
+    border-radius: 3px;
+    font-size: 11px;
+  }
+  .live-cue-name {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    min-width: 0;
+  }
+  .live-cue-meta {
+    font-size: 9px;
+    color: var(--muted);
+    font-variant-numeric: tabular-nums;
+  }
+  .live-cue-deck-btn {
+    background: transparent;
+    border: 1px solid var(--cell-border);
+    color: var(--text);
+    font: inherit;
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+    padding: 4px 10px;
+    cursor: pointer;
+    min-width: 32px;
+  }
+  .live-cue-deck-btn:hover { border-color: var(--accent); color: var(--accent); }
+  .live-cue-rm {
+    background: transparent;
+    border: 1px solid var(--cell-border);
+    color: var(--muted);
+    font: inherit;
+    font-size: 10px;
+    padding: 4px 8px;
+    cursor: pointer;
+  }
+  .live-cue-rm:hover { border-color: var(--text); color: var(--text); }
   .live-xfade-row {
     display: flex;
     align-items: center;
@@ -1217,6 +1308,19 @@
       </div>
 
       <div class="live-controls" id="live-controls">
+        <div class="live-cue" id="live-cue">
+          <div class="live-cue-head">
+            <span class="live-cue-label">Cue</span>
+            <span class="live-cue-count" id="live-cue-count">0 staged</span>
+            <div class="live-cue-btns">
+              <button class="small" id="cue-add">+ Add files</button>
+              <button class="small" id="cue-save" title="Download the current cue (bundled .json)">Save cue</button>
+              <button class="small" id="cue-load" title="Load a previously saved cue file">Load cue</button>
+              <button class="small" id="cue-clear" title="Empty the cue">Clear</button>
+            </div>
+          </div>
+          <div class="live-cue-list" id="live-cue-list"></div>
+        </div>
         <div class="live-decks-row">
           <div class="live-deck-ctrl" data-deck="A">
             <div class="live-deck-head">
@@ -7887,6 +7991,174 @@
     });
   }
   buildDeckEq('A'); buildDeckEq('B');
+
+  // ---------- Live cue ----------
+  // A staging list — user adds project files, then sends each to Deck A or
+  // Deck B with one click. The chosen entry is removed from the cue after
+  // it's sent. Cues can be exported / re-imported as a single bundled JSON.
+  const liveCue = [];
+  let _cueIdCounter = 1;
+
+  function rebuildCueUI() {
+    const listEl = document.getElementById('live-cue-list');
+    const countEl = document.getElementById('live-cue-count');
+    if (!listEl) return;
+    listEl.innerHTML = '';
+    if (countEl) countEl.textContent = liveCue.length + ' staged';
+    if (liveCue.length === 0) {
+      const hint = el('div', 'live-cue-empty',
+        'Empty cue — drop project files here, or use "+ Add files".');
+      listEl.appendChild(hint);
+      return;
+    }
+    liveCue.forEach(entry => {
+      const row = el('div', 'live-cue-item');
+      const nameEl = el('span', 'live-cue-name', entry.name);
+      nameEl.title = entry.name;
+      const meta = el('span', 'live-cue-meta',
+        (Array.isArray(entry.data.tracks) ? entry.data.tracks.length : 0) + ' tr'
+        + (entry.data.bpm !== undefined ? ' · ' + entry.data.bpm + ' bpm' : ''));
+      const aBtn = el('button', 'live-cue-deck-btn', 'A');
+      aBtn.title = 'Send to Deck A (replaces current Deck A)';
+      const bBtn = el('button', 'live-cue-deck-btn', 'B');
+      bBtn.title = 'Send to Deck B (replaces current Deck B)';
+      const rmBtn = el('button', 'live-cue-rm', '×');
+      rmBtn.title = 'Remove from cue';
+      aBtn.addEventListener('click', () => sendCueToDeck(entry.id, 'A'));
+      bBtn.addEventListener('click', () => sendCueToDeck(entry.id, 'B'));
+      rmBtn.addEventListener('click', () => { removeFromCue(entry.id); });
+      row.appendChild(nameEl);
+      row.appendChild(meta);
+      row.appendChild(aBtn);
+      row.appendChild(bBtn);
+      row.appendChild(rmBtn);
+      listEl.appendChild(row);
+    });
+  }
+
+  function addToCue(name, data) {
+    if (!data || !Array.isArray(data.tracks)) {
+      alert('"' + name + '" is not a substrata project.');
+      return;
+    }
+    liveCue.push({ id: _cueIdCounter++, name, data });
+    rebuildCueUI();
+  }
+  function removeFromCue(id) {
+    const i = liveCue.findIndex(c => c.id === id);
+    if (i >= 0) liveCue.splice(i, 1);
+    rebuildCueUI();
+  }
+  function sendCueToDeck(id, deck) {
+    const entry = liveCue.find(c => c.id === id);
+    if (!entry) return;
+    loadProjectIntoDeck(entry.data, deck, entry.name);
+    removeFromCue(id);
+  }
+  function clearCue() {
+    liveCue.length = 0;
+    rebuildCueUI();
+  }
+
+  function openCueAddDialog() {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.multiple = true;
+    input.accept = '.json,application/json';
+    input.addEventListener('change', () => {
+      const files = Array.from(input.files || []);
+      files.forEach(file => {
+        const reader = new FileReader();
+        reader.onload = () => {
+          try { addToCue(file.name, JSON.parse(reader.result)); }
+          catch (e) { alert('Could not parse ' + file.name + ': ' + e.message); }
+        };
+        reader.readAsText(file);
+      });
+    });
+    input.click();
+  }
+
+  function saveCueToFile() {
+    if (liveCue.length === 0) { alert('Cue is empty — add files first.'); return; }
+    const payload = {
+      type: 'substrata-cue',
+      version: 1,
+      savedAt: new Date().toISOString(),
+      items: liveCue.map(c => ({ name: c.name, data: c.data }))
+    };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    const ts = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
+    a.href = url;
+    a.download = 'substrata-cue-' + ts + '.json';
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1500);
+  }
+
+  function loadCueFromFile() {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.json,application/json';
+    input.addEventListener('change', () => {
+      const file = input.files && input.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = () => {
+        try {
+          const parsed = JSON.parse(reader.result);
+          if (!parsed || parsed.type !== 'substrata-cue' || !Array.isArray(parsed.items)) {
+            alert('That file is not a substrata cue.');
+            return;
+          }
+          clearCue();
+          parsed.items.forEach(it => {
+            if (it && it.name && it.data) liveCue.push({ id: _cueIdCounter++, name: it.name, data: it.data });
+          });
+          rebuildCueUI();
+        } catch (e) { alert('Failed to load cue: ' + e.message); }
+      };
+      reader.readAsText(file);
+    });
+    input.click();
+  }
+
+  const cueAdd   = document.getElementById('cue-add');
+  const cueSave  = document.getElementById('cue-save');
+  const cueLoad  = document.getElementById('cue-load');
+  const cueClear = document.getElementById('cue-clear');
+  if (cueAdd)   cueAdd.addEventListener('click', openCueAddDialog);
+  if (cueSave)  cueSave.addEventListener('click', saveCueToFile);
+  if (cueLoad)  cueLoad.addEventListener('click', loadCueFromFile);
+  if (cueClear) cueClear.addEventListener('click', () => {
+    if (liveCue.length === 0) return;
+    if (confirm('Clear the cue?')) clearCue();
+  });
+
+  // Drag-and-drop project files onto the cue zone
+  const cueZone = document.getElementById('live-cue');
+  if (cueZone) {
+    ['dragenter','dragover'].forEach(ev => {
+      cueZone.addEventListener(ev, e => { e.preventDefault(); cueZone.classList.add('drag-over'); });
+    });
+    ['dragleave','drop'].forEach(ev => {
+      cueZone.addEventListener(ev, e => { e.preventDefault(); cueZone.classList.remove('drag-over'); });
+    });
+    cueZone.addEventListener('drop', e => {
+      const files = Array.from(e.dataTransfer && e.dataTransfer.files || []);
+      files.filter(f => /\.json$/i.test(f.name)).forEach(file => {
+        const reader = new FileReader();
+        reader.onload = () => {
+          try { addToCue(file.name, JSON.parse(reader.result)); }
+          catch (err) { alert('Could not parse ' + file.name + ': ' + err.message); }
+        };
+        reader.readAsText(file);
+      });
+    });
+  }
+
+  rebuildCueUI();
 
   updateLiveDeckLabels();
 
