@@ -194,6 +194,19 @@
   }
   .add-row button.small:hover { border-color: var(--text); }
 
+  /* effects mode: hide tracks UI, reflow effect modules into a grid */
+  body.mode-effects .add-row,
+  body.mode-effects #tracks,
+  body.mode-effects .mixer { display: none !important; }
+  body.mode-effects .layout { grid-template-columns: 1fr; }
+  body.mode-effects .side {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 18px;
+    flex-direction: row;
+  }
+  body.mode-effects { padding-bottom: 24px !important; }
+
   /* mixing mode: hide everything except name + toggles */
   body.mode-mixing .steps-row,
   body.mode-mixing .track-knobs,
@@ -714,6 +727,7 @@
         </div>
         <div class="tabs" id="mode-toggle">
           <button data-mode="recording" class="on">Track</button>
+          <button data-mode="effects">Effects</button>
           <button data-mode="mixing">Mix</button>
         </div>
         <button id="folder" class="small" title="set project folder">📁 Folder</button>
@@ -749,6 +763,8 @@
       <div class="module" id="flanger"></div>
       <div class="module" id="bitcrush"></div>
       <div class="module" id="tape"></div>
+      <div class="module" id="lpfilter"></div>
+      <div class="module" id="hpfilter"></div>
     </aside>
   </div>
 
@@ -961,7 +977,8 @@
     const target  = midiToFreq(tr.root + offset);
     const slide   = env && env.prevSlide && env.prevFreq;
     const stepDur = env.stepDur;
-    const holdEnd = t + stepDur;
+    const stepLen = (step && step.length != null) ? step.length : 1.0;
+    const holdEnd = t + stepDur * stepLen;
     const off     = holdEnd + Math.max(tr.release, tr.fDecay) + 0.15;
 
     const sub = ctx.createOscillator(); sub.type = 'sine';
@@ -1087,7 +1104,8 @@
   function vChord(ctx, t, out, tr, step, env) {
     const midiNotes = chordNotesFor(tr, step);
     const stepDur   = env.stepDur;
-    const holdEnd   = t + stepDur * tr.lengthSteps;
+    const stepLen   = (step && step.length != null) ? step.length : 1.0;
+    const holdEnd   = t + stepDur * tr.lengthSteps * stepLen;
     const off       = holdEnd + Math.max(tr.release, tr.fRelease) + 0.15;
 
     // 24dB/oct lowpass = two cascaded biquads
@@ -1199,7 +1217,8 @@
     const target  = midiToFreq(tr.root + offset);
     const slide   = env && env.prevSlide && env.prevFreq;
     const stepDur = env.stepDur;
-    const holdEnd = t + stepDur;
+    const stepLen = (step && step.length != null) ? step.length : 1.0;
+    const holdEnd = t + stepDur * stepLen;
     const off     = holdEnd + Math.max(tr.release, tr.fRelease) + 0.15;
 
     const f1 = ctx.createBiquadFilter(); f1.type = 'lowpass'; f1.Q.value = tr.reso;
@@ -1317,7 +1336,8 @@
     const intervals = MELLOTRON_VOICINGS[tr.voicing] || [0];
     const midiNotes = intervals.map(iv => baseMidi + iv);
     const stepDur = env.stepDur;
-    const holdEnd = t + stepDur * tr.lengthSteps;
+    const stepLen = (step && step.length != null) ? step.length : 1.0;
+    const holdEnd = t + stepDur * tr.lengthSteps * stepLen;
     const off     = holdEnd + Math.max(tr.release, tr.fRelease) + 0.2;
 
     // 24 dB lowpass like the chord engine
@@ -1455,7 +1475,8 @@
     playFrac = clamp(playFrac, 0, 0.999);
     const playStartSec = truncStartSec + playFrac * truncDur;
     const remainingSec = (truncEndSec - playStartSec) / rate;
-    const requestedLenSec = tr.length / 1000;
+    const stepLen = (step && step.length != null) ? step.length : 1.0;
+    const requestedLenSec = (tr.length / 1000) * stepLen;
     // when looping, len can exceed remaining (it wraps within trunc region)
     const lenSec = tr.loop ? requestedLenSec : Math.min(requestedLenSec, remainingSec);
     if (lenSec <= 0.001) return;
@@ -2169,7 +2190,7 @@
   }
 
   // ---------- audio graph ----------
-  let masterIn, masterOut, eqLow, eqMid, eqHigh, warmLow, warmHigh, warmShaper, compressor, masterLimiter;
+  let masterIn, masterOut, eqLow, eqMid, eqHigh, warmLow, warmHigh, warmShaper, compressor, masterLP, masterHP, masterLimiter;
   let delayBus, delayNode, delayFb, delayWet;
   let reverbBus, reverbNode, reverbWet;
   let chorusBus, chorusDelL, chorusDelR, chorusLfoL, chorusLfoR, chorusModL, chorusModR, chorusWet;
@@ -2207,6 +2228,8 @@
   const compCfg     = { threshold: -18, ratio: 4, attack: 0.005, release: 0.18, knee: 6 };
   const duckCfg     = { sourceIndex: -1, attack: 0.012, release: 0.22 };
   const tapeCfg     = { wow: 0, flutter: 0, crackle: 0, hiss: 0, sat: 0, tone: 0, wet: 0 };
+  const lpfCfg      = { freq: 22000, q: 0.7 };
+  const hpfCfg      = { freq: 20, q: 0.7 };
   const decks = {
     A: { name: '', vol: 0.8, low: 0, mid: 0, high: 0, playing: false, buffer: null, source: null },
     B: { name: '', vol: 0.8, low: 0, mid: 0, high: 0, playing: false, buffer: null, source: null },
@@ -2368,11 +2391,17 @@
 
     tapeWet.connect(tapeOut);
 
+    // Insert filters (LP + HP) sit just before the brick-wall limiter.
+    masterLP = audioCtx.createBiquadFilter(); masterLP.type = 'lowpass';
+    masterLP.frequency.value = lpfCfg.freq; masterLP.Q.value = lpfCfg.q;
+    masterHP = audioCtx.createBiquadFilter(); masterHP.type = 'highpass';
+    masterHP.frequency.value = hpfCfg.freq; masterHP.Q.value = hpfCfg.q;
+
     masterOut  = audioCtx.createGain();         masterOut.gain.value = master.vol;
     masterIn.connect(eqLow).connect(eqMid).connect(eqHigh)
             .connect(warmLow).connect(warmHigh).connect(warmShaper)
             .connect(compressor).connect(tapeIn);
-    tapeOut.connect(masterLimiter)
+    tapeOut.connect(masterLP).connect(masterHP).connect(masterLimiter)
            .connect(masterOut).connect(audioCtx.destination);
 
     delayBus  = audioCtx.createGain();
@@ -3978,7 +4007,7 @@
         k.appendChild(cell);
       });
     } else {
-      k.appendChild(group(null,
+      const stdControls = [
         numField('Stp', 1, 128, track.steps, n => { track.steps = n; rebuildSteps(track); }),
         knob('Vol', 0, 1.2, 0.01, track.volume, v => {
           track.volume = v;
@@ -3986,7 +4015,17 @@
         }, v => v.toFixed(2)),
         knob('Swg', 0, 0.6, 0.01, track.swing || 0, v => track.swing = v, v => v.toFixed(2)),
         checkBox('Mono', track.mono, v => { track.mono = v; if (!v) track._lastTrigGain = null; }),
-      ));
+      ];
+      if (NOTE_LEN_KINDS.has(track.kind)) {
+        const curLen = track.noteLen != null ? track.noteLen : 1.0;
+        stdControls.push(knob('NLen', 0.1, 3, 0.05, curLen, v => {
+          track.noteLen = v;
+          // overwrite every existing step's length too
+          for (const entry of track.pattern) { if (entry) entry.length = v; }
+          rebuildSteps(track);
+        }, v => v.toFixed(2)));
+      }
+      k.appendChild(group(null, ...stdControls));
       if (PRESET_KINDS.has(track.kind)) {
         const presetWrap = el('div', 'group');
         presetWrap.appendChild(el('span', 'label', 'Preset'));
@@ -4429,7 +4468,7 @@
       renderStep(cell, track, i);
 
       // forward refs so the click handler can refresh the lanes when a step is toggled off
-      let velRef = null, panRef = null;
+      let velRef = null, panRef = null, lenRef = null;
 
       cell.addEventListener('click', (e) => {
         if ((track.kind === 'bass' || track.kind === 'lead') && e.shiftKey) {
@@ -4443,6 +4482,7 @@
         renderStep(cell, track, i);
         if (velRef) renderLane(velRef, track, i, 'vel');
         if (panRef) renderLane(panRef, track, i, 'pan');
+        if (lenRef) renderLane(lenRef, track, i, 'length');
       });
 
       if (track.kind === 'bass' || track.kind === 'lead' || track.kind === 'granular' || track.kind === 'mellotron') {
@@ -4557,18 +4597,30 @@
       col.appendChild(pan);
       panRef = pan;
 
+      if (NOTE_LEN_KINDS.has(track.kind)) {
+        const len = el('div', 'lane-cell length');
+        const lenBar = el('div', 'bar'); len.appendChild(lenBar);
+        renderLane(len, track, i, 'length');
+        attachLaneDrag(len, track, i, 'length');
+        col.appendChild(len);
+        lenRef = len;
+      }
+
       track.stepsEl.appendChild(col);
     }
   }
 
   function defaultEntry(track) {
     const base = { vel: 1, pan: 0 };
-    if (track.kind === 'bass' || track.kind === 'lead') return { ...base, pitch: 0, slide: false };
-    if (track.kind === 'granular') return { ...base, pitch: 0 };
-    if (track.kind === 'mellotron') return { ...base, pitch: 0 };
-    if (track.kind === 'chord') return { ...base, degree: 0, quality: 'auto' };
+    const len = track.noteLen != null ? track.noteLen : 1.0;
+    if (track.kind === 'bass' || track.kind === 'lead') return { ...base, pitch: 0, slide: false, length: len };
+    if (track.kind === 'granular') return { ...base, pitch: 0, length: len };
+    if (track.kind === 'mellotron') return { ...base, pitch: 0, length: len };
+    if (track.kind === 'chord') return { ...base, degree: 0, quality: 'auto', length: len };
     return base;
   }
+  // Which kinds support per-step note length
+  const NOTE_LEN_KINDS = new Set(['bass','lead','chord','mellotron','granular']);
   function toggleStep(track, i) {
     track.pattern[i] = track.pattern[i] ? false : defaultEntry(track);
   }
@@ -4593,7 +4645,7 @@
       const v = entry.vel ?? 1;
       bar.style.top = ''; bar.style.bottom = '0';
       bar.style.height = (v * 100) + '%';
-    } else {
+    } else if (kind === 'pan') {
       const v = entry.pan ?? 0;
       if (v >= 0) {
         bar.style.bottom = '50%';
@@ -4604,6 +4656,11 @@
         bar.style.bottom = '';
         bar.style.height = (-v * 50) + '%';
       }
+    } else if (kind === 'length') {
+      // 0..3 mapped to 0..100% from bottom. 1.0 sits at 33%.
+      const v = entry.length ?? 1.0;
+      bar.style.top = ''; bar.style.bottom = '0';
+      bar.style.height = Math.min(100, (v / 3) * 100) + '%';
     }
   }
   function attachLaneDrag(cellEl, track, i, kind) {
@@ -4612,7 +4669,11 @@
       const rect = cellEl.getBoundingClientRect();
       const update = (y) => {
         const t = clamp((rect.bottom - y) / rect.height, 0, 1);
-        const val = kind === 'vel' ? t : (t * 2 - 1);
+        let val;
+        if (kind === 'vel')         val = t;          // 0..1
+        else if (kind === 'pan')    val = t * 2 - 1;  // -1..1
+        else if (kind === 'length') val = t * 3;      // 0..3
+        else                        val = t;
         track.pattern[i][kind] = val;
         renderLane(cellEl, track, i, kind);
       };
@@ -4864,6 +4925,33 @@
     sideRow(m, 'Rel', 0.02, 1.5, 0.01, duckCfg.release, v => {
       duckCfg.release = v;
     }, v => (v * 1000).toFixed(0));
+  }
+
+  function buildLPFilter() {
+    const m = document.getElementById('lpfilter');
+    m.innerHTML = '';
+    m.appendChild(el('h2', null, 'Low-Pass'));
+    sideRow(m, 'Cut', 20, 22000, 10, lpfCfg.freq, v => {
+      lpfCfg.freq = v;
+      if (masterLP) masterLP.frequency.setTargetAtTime(v, audioCtx.currentTime, 0.02);
+    }, v => Math.round(v));
+    sideRow(m, 'Q', 0.1, 20, 0.1, lpfCfg.q, v => {
+      lpfCfg.q = v;
+      if (masterLP) masterLP.Q.setTargetAtTime(v, audioCtx.currentTime, 0.02);
+    }, v => v.toFixed(1));
+  }
+  function buildHPFilter() {
+    const m = document.getElementById('hpfilter');
+    m.innerHTML = '';
+    m.appendChild(el('h2', null, 'High-Pass'));
+    sideRow(m, 'Cut', 20, 22000, 10, hpfCfg.freq, v => {
+      hpfCfg.freq = v;
+      if (masterHP) masterHP.frequency.setTargetAtTime(v, audioCtx.currentTime, 0.02);
+    }, v => Math.round(v));
+    sideRow(m, 'Q', 0.1, 20, 0.1, hpfCfg.q, v => {
+      hpfCfg.q = v;
+      if (masterHP) masterHP.Q.setTargetAtTime(v, audioCtx.currentTime, 0.02);
+    }, v => v.toFixed(1));
   }
 
   function buildTape() {
@@ -5342,7 +5430,7 @@
 
   // ---------- save / load ----------
   const SAVE_KEYS = {
-    common: ['name','kind','steps','pattern','volume','mute','solo','armed','group','swing','mono','expanded',
+    common: ['name','kind','steps','pattern','volume','mute','solo','armed','group','swing','mono','noteLen','expanded',
              'delaySend','reverbSend','chorusSend','flangerSend','bitcrushSend','duckAmt',
              'trkLfoRate','trkLfoShape','trkLfoVolDepth','trkLfoPanDepth'],
     drum:   ['voiceType','tune'],
@@ -5386,7 +5474,7 @@
       version: 1,
       bpm: parseFloat(bpmInput.value),
       tracks: tracks.map(serializeTrack),
-      master, delayCfg, reverbCfg, chorusCfg, flangerCfg, bitcrushCfg, compCfg, duckCfg, tapeCfg,
+      master, delayCfg, reverbCfg, chorusCfg, flangerCfg, bitcrushCfg, compCfg, duckCfg, tapeCfg, lpfCfg, hpfCfg,
       decks: { A: deckSnap(decks.A), B: deckSnap(decks.B), xfade: decks.xfade },
     };
   }
@@ -5439,6 +5527,8 @@
     if (tapeFilterLP)     tapeFilterLP.frequency.value = 18000 - tapeCfg.tone * 12000;
     if (tapeDry) tapeDry.gain.value = 1 - tapeCfg.wet;
     if (tapeWet) tapeWet.gain.value = tapeCfg.wet;
+    if (masterLP) { masterLP.frequency.value = lpfCfg.freq; masterLP.Q.value = lpfCfg.q; }
+    if (masterHP) { masterHP.frequency.value = hpfCfg.freq; masterHP.Q.value = hpfCfg.q; }
     ['A','B'].forEach(k => {
       const d = decks[k];
       if (d.gain)   d.gain.gain.value      = d.vol;
@@ -5450,7 +5540,7 @@
   }
   function rebuildAllUI() {
     tracksEl.innerHTML = '';
-    ['master','comp','ducker','delay','reverb','chorus','flanger','bitcrush','tape','mixer'].forEach(id => {
+    ['master','comp','ducker','delay','reverb','chorus','flanger','bitcrush','tape','lpfilter','hpfilter','mixer'].forEach(id => {
       const node = document.getElementById(id);
       if (node) node.innerHTML = '';
     });
@@ -5458,6 +5548,7 @@
     buildMaster(); buildComp(); buildDucker();
     buildDelay(); buildReverb();
     buildChorus(); buildFlanger(); buildBitcrush(); buildTape();
+  buildLPFilter(); buildHPFilter();
     buildMixer();
     applyCollapsibles();
   }
@@ -5511,6 +5602,8 @@
     if (data.compCfg)     Object.assign(compCfg, data.compCfg);
     if (data.duckCfg)     Object.assign(duckCfg, data.duckCfg);
     if (data.tapeCfg)     Object.assign(tapeCfg, data.tapeCfg);
+    if (data.lpfCfg)      Object.assign(lpfCfg,  data.lpfCfg);
+    if (data.hpfCfg)      Object.assign(hpfCfg,  data.hpfCfg);
     if (data.decks) {
       ['A','B'].forEach(k => {
         if (data.decks[k]) {
@@ -5628,7 +5721,7 @@
     });
   }
   function applyCollapsibles() {
-    ['master','comp','ducker','delay','reverb','chorus','flanger','bitcrush','tape'].forEach(id => {
+    ['master','comp','ducker','delay','reverb','chorus','flanger','bitcrush','tape','lpfilter','hpfilter'].forEach(id => {
       const m = document.getElementById(id);
       if (m) makeCollapsible(m);
     });
@@ -5661,7 +5754,8 @@
     btn.addEventListener('click', () => {
       const mode = btn.dataset.mode;
       currentMode = mode;
-      document.body.classList.toggle('mode-mixing', mode === 'mixing');
+      document.body.classList.toggle('mode-mixing',  mode === 'mixing');
+      document.body.classList.toggle('mode-effects', mode === 'effects');
       modeBtns.forEach(b => b.classList.toggle('on', b === btn));
     });
   });
@@ -5689,6 +5783,7 @@
   buildMaster(); buildComp(); buildDucker();
   buildDelay(); buildReverb();
   buildChorus(); buildFlanger(); buildBitcrush(); buildTape();
+  buildLPFilter(); buildHPFilter();
 
   // default: mixer starts collapsed
   document.getElementById('mixer').classList.add('collapsed');
