@@ -438,34 +438,53 @@
   body.mode-live .track-knobs,
   body.mode-live .mic-control { display: none !important; }
   body.mode-live .live-controls {
-    display: flex;
-    flex-direction: column;
-    gap: 14px;
+    display: grid;
+    grid-template-columns: 260px minmax(0, 1fr);
+    column-gap: 24px;
+    align-items: start;
     margin: 6px 0 18px;
     padding-bottom: 14px;
     border-bottom: 1px solid var(--line);
+  }
+  .live-main-controls {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    min-width: 0;
   }
   .live-decks-row {
     display: grid;
     grid-template-columns: 1fr 1fr;
     gap: 24px;
   }
-  /* Cue — stage multiple projects, then send each to Deck A or Deck B */
+  /* Tracks (deck channels) live in the right column too — same 260px offset
+     keeps the deck A and B columns aligned with the controls above. */
+  body.mode-live #tracks {
+    margin-left: 284px;
+  }
+  /* Cue — stage multiple projects, then send each to Deck A or Deck B.
+     Lives as a fixed-width column on the left of Live mode, sticky so it
+     stays visible while scrolling through deck channels. */
   .live-cue {
     display: flex;
     flex-direction: column;
     gap: 8px;
-    padding-bottom: 12px;
-    border-bottom: 1px solid var(--line);
+    padding: 10px;
+    border: 1px solid var(--line);
+    border-radius: 3px;
+    position: sticky;
+    top: 12px;
+    max-height: calc(100vh - 80px);
+    overflow-y: auto;
   }
   .live-cue.drag-over {
     background: rgba(255, 86, 35, 0.06);
-    border-radius: 4px;
+    border-color: var(--accent);
   }
   .live-cue-head {
     display: flex;
-    align-items: center;
-    gap: 12px;
+    align-items: baseline;
+    gap: 8px;
   }
   .live-cue-label {
     font-size: 11px;
@@ -480,8 +499,8 @@
   }
   .live-cue-btns {
     display: flex;
-    gap: 6px;
-    margin-left: auto;
+    flex-wrap: wrap;
+    gap: 4px;
   }
   .live-cue-list {
     display: flex;
@@ -498,21 +517,27 @@
   }
   .live-cue-item {
     display: grid;
-    grid-template-columns: 1fr auto auto auto auto;
+    grid-template-columns: 1fr auto auto auto;
+    grid-template-areas:
+      "name name name name"
+      "meta a    b    rm";
     align-items: center;
-    column-gap: 6px;
-    padding: 5px 8px;
+    column-gap: 4px;
+    row-gap: 4px;
+    padding: 6px 8px;
     border: 1px solid var(--line);
     border-radius: 3px;
     font-size: 11px;
   }
   .live-cue-name {
+    grid-area: name;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
     min-width: 0;
   }
   .live-cue-meta {
+    grid-area: meta;
     font-size: 9px;
     color: var(--muted);
     font-variant-numeric: tabular-nums;
@@ -526,18 +551,21 @@
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.6px;
-    padding: 4px 10px;
+    padding: 4px 9px;
     cursor: pointer;
-    min-width: 32px;
+    min-width: 28px;
   }
+  .live-cue-item .live-cue-deck-btn:nth-of-type(1) { grid-area: a; }
+  .live-cue-item .live-cue-deck-btn:nth-of-type(2) { grid-area: b; }
   .live-cue-deck-btn:hover { border-color: var(--accent); color: var(--accent); }
   .live-cue-rm {
+    grid-area: rm;
     background: transparent;
     border: 1px solid var(--cell-border);
     color: var(--muted);
     font: inherit;
     font-size: 10px;
-    padding: 4px 8px;
+    padding: 4px 7px;
     cursor: pointer;
   }
   .live-cue-rm:hover { border-color: var(--text); color: var(--text); }
@@ -741,9 +769,17 @@
   body.mode-live #live-unmute-B { display: none !important; }
   /* Mixer (deck audio mixer) is gone from the Effects tab now */
   .mixer { display: none !important; }
+  @media (max-width: 1024px) {
+    body.mode-live .live-controls { grid-template-columns: 1fr; }
+    body.mode-live #tracks { margin-left: 0; }
+    body.mode-live .live-cue {
+      position: static;
+      max-height: none;
+      overflow-y: visible;
+    }
+  }
   @media (max-width: 720px) {
     body.mode-live #tracks { grid-template-columns: 1fr; }
-    body.mode-live .live-controls { grid-template-columns: 1fr; }
     body.mode-live .live-deck-ctrl[data-deck="B"] {
       border-left: none;
       padding-left: 0;
@@ -1308,19 +1344,20 @@
       </div>
 
       <div class="live-controls" id="live-controls">
-        <div class="live-cue" id="live-cue">
+        <aside class="live-cue" id="live-cue">
           <div class="live-cue-head">
             <span class="live-cue-label">Cue</span>
             <span class="live-cue-count" id="live-cue-count">0 staged</span>
-            <div class="live-cue-btns">
-              <button class="small" id="cue-add">+ Add files</button>
-              <button class="small" id="cue-save" title="Download the current cue (bundled .json)">Save cue</button>
-              <button class="small" id="cue-load" title="Load a previously saved cue file">Load cue</button>
-              <button class="small" id="cue-clear" title="Empty the cue">Clear</button>
-            </div>
+          </div>
+          <div class="live-cue-btns">
+            <button class="small" id="cue-add">+ Add files</button>
+            <button class="small" id="cue-save" title="Download the current cue (bundled .json)">Save</button>
+            <button class="small" id="cue-load" title="Load a previously saved cue file">Load</button>
+            <button class="small" id="cue-clear" title="Empty the cue">Clear</button>
           </div>
           <div class="live-cue-list" id="live-cue-list"></div>
-        </div>
+        </aside>
+        <div class="live-main-controls">
         <div class="live-decks-row">
           <div class="live-deck-ctrl" data-deck="A">
             <div class="live-deck-head">
@@ -1355,6 +1392,7 @@
                  title="Crossfade between Deck A and Deck B (double-click to center)">
           <span class="live-xfade-label">B</span>
           <span class="live-xfade-readout" id="live-xfade-readout">A 1.00 · B 1.00</span>
+        </div>
         </div>
       </div>
       <div id="tracks" class="tracks"></div>
