@@ -2062,6 +2062,325 @@
     s.connect(hp).connect(lp).connect(g).connect(out); s.start(t); s.stop(t + 0.3);
   }
 
+  // TR-606 — small analog (1981)
+  function v606Kick(ctx, t, out, tr) {
+    const m = semi(tr.tune);
+    const o = ctx.createOscillator(); o.type='sine';
+    o.frequency.setValueAtTime(140 * m, t);
+    o.frequency.exponentialRampToValueAtTime(48 * m, t + 0.04);
+    const og = ctx.createGain();
+    og.gain.setValueAtTime(0.0001, t);
+    og.gain.exponentialRampToValueAtTime(0.95, t + 0.002);
+    og.gain.exponentialRampToValueAtTime(0.0001, t + 0.2);
+    o.connect(og).connect(out); o.start(t); o.stop(t + 0.25);
+  }
+  function v606Snare(ctx, t, out, tr) {
+    const m = semi(tr.tune);
+    const o = ctx.createOscillator(); o.type='triangle'; o.frequency.value = 230 * m;
+    const og = ctx.createGain();
+    og.gain.setValueAtTime(0.0001, t);
+    og.gain.exponentialRampToValueAtTime(0.4, t + 0.001);
+    og.gain.exponentialRampToValueAtTime(0.0001, t + 0.08);
+    o.connect(og).connect(out); o.start(t); o.stop(t + 0.1);
+    const ns = ctx.createBufferSource(); ns.buffer = getNoise(ctx);
+    const nhp = ctx.createBiquadFilter(); nhp.type='highpass'; nhp.frequency.value = 1500*m;
+    const ng = ctx.createGain();
+    ng.gain.setValueAtTime(0.0001, t);
+    ng.gain.exponentialRampToValueAtTime(0.5, t + 0.001);
+    ng.gain.exponentialRampToValueAtTime(0.0001, t + 0.1);
+    ns.connect(nhp).connect(ng).connect(out); ns.start(t); ns.stop(t + 0.12);
+  }
+  function v606Hat(ctx, t, out, tr) {
+    const m = semi(tr.tune);
+    const s = ctx.createBufferSource(); s.buffer = getNoise(ctx);
+    const hp = ctx.createBiquadFilter(); hp.type='highpass'; hp.frequency.value = 10000*m;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.4, t + 0.001);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.025);
+    s.connect(hp).connect(g).connect(out); s.start(t); s.stop(t + 0.04);
+  }
+  function v606OHat(ctx, t, out, tr) {
+    const m = semi(tr.tune);
+    const s = ctx.createBufferSource(); s.buffer = getNoise(ctx);
+    const hp = ctx.createBiquadFilter(); hp.type='highpass'; hp.frequency.value = 9500*m;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.4, t + 0.002);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.3);
+    s.connect(hp).connect(g).connect(out); s.start(t); s.stop(t + 0.35);
+  }
+  function v606Cymbal(ctx, t, out, tr) {
+    const m = semi(tr.tune);
+    const s = ctx.createBufferSource(); s.buffer = getNoise(ctx);
+    const bp = ctx.createBiquadFilter(); bp.type='bandpass'; bp.frequency.value = 5500*m; bp.Q.value = 1.5;
+    const hp = ctx.createBiquadFilter(); hp.type='highpass'; hp.frequency.value = 4500*m;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.4, t + 0.003);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 1.0);
+    s.connect(hp).connect(bp).connect(g).connect(out); s.start(t); s.stop(t + 1.1);
+  }
+
+  // TR-727 — Latin percussion sister of 707 (1985)
+  function v727Conga(ctx, t, out, tr) {
+    const m = semi(tr.tune);
+    const o = ctx.createOscillator(); o.type='sine';
+    o.frequency.setValueAtTime(280 * m, t);
+    o.frequency.exponentialRampToValueAtTime(180 * m, t + 0.06);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.65, t + 0.002);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.18);
+    o.connect(g).connect(out); o.start(t); o.stop(t + 0.22);
+  }
+  function v727Bongo(ctx, t, out, tr) {
+    const m = semi(tr.tune);
+    const o = ctx.createOscillator(); o.type='sine';
+    o.frequency.setValueAtTime(420 * m, t);
+    o.frequency.exponentialRampToValueAtTime(290 * m, t + 0.04);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.6, t + 0.002);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.13);
+    o.connect(g).connect(out); o.start(t); o.stop(t + 0.16);
+  }
+  function v727Timbale(ctx, t, out, tr) {
+    const m = semi(tr.tune);
+    const o = ctx.createOscillator(); o.type='triangle';
+    o.frequency.setValueAtTime(320 * m, t);
+    o.frequency.exponentialRampToValueAtTime(220 * m, t + 0.05);
+    const og = ctx.createGain();
+    og.gain.setValueAtTime(0.0001, t);
+    og.gain.exponentialRampToValueAtTime(0.55, t + 0.001);
+    og.gain.exponentialRampToValueAtTime(0.0001, t + 0.15);
+    o.connect(og).connect(out); o.start(t); o.stop(t + 0.18);
+    const ns = ctx.createBufferSource(); ns.buffer = getNoise(ctx);
+    const nbp = ctx.createBiquadFilter(); nbp.type='bandpass'; nbp.frequency.value = 1500*m; nbp.Q.value = 4;
+    const ng = ctx.createGain();
+    ng.gain.setValueAtTime(0.0001, t);
+    ng.gain.exponentialRampToValueAtTime(0.25, t + 0.001);
+    ng.gain.exponentialRampToValueAtTime(0.0001, t + 0.05);
+    ns.connect(nbp).connect(ng).connect(out); ns.start(t); ns.stop(t + 0.06);
+  }
+  function v727Agogo(ctx, t, out, tr) {
+    const m = semi(tr.tune);
+    const o1 = ctx.createOscillator(); o1.type='sine'; o1.frequency.value = 1200*m;
+    const o2 = ctx.createOscillator(); o2.type='sine'; o2.frequency.value = 1800*m;
+    const bp = ctx.createBiquadFilter(); bp.type='bandpass'; bp.frequency.value = 1500*m; bp.Q.value = 3;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.4, t + 0.001);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.18);
+    o1.connect(bp); o2.connect(bp); bp.connect(g).connect(out);
+    o1.start(t); o1.stop(t+0.22); o2.start(t); o2.stop(t+0.22);
+  }
+  function v727Whistle(ctx, t, out, tr) {
+    const m = semi(tr.tune);
+    const o = ctx.createOscillator(); o.type='sine';
+    o.frequency.setValueAtTime(2200 * m, t);
+    o.frequency.linearRampToValueAtTime(2800 * m, t + 0.03);
+    o.frequency.linearRampToValueAtTime(2400 * m, t + 0.08);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.35, t + 0.005);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.15);
+    o.connect(g).connect(out); o.start(t); o.stop(t + 0.18);
+  }
+
+  // TR-505 — clean PCM-style drums (1986)
+  function v505Kick(ctx, t, out, tr) {
+    const m = semi(tr.tune);
+    const o = ctx.createOscillator(); o.type='sine';
+    o.frequency.setValueAtTime(165 * m, t);
+    o.frequency.exponentialRampToValueAtTime(55 * m, t + 0.045);
+    const og = ctx.createGain();
+    og.gain.setValueAtTime(0.0001, t);
+    og.gain.exponentialRampToValueAtTime(0.95, t + 0.002);
+    og.gain.exponentialRampToValueAtTime(0.0001, t + 0.22);
+    o.connect(og).connect(out); o.start(t); o.stop(t + 0.26);
+    const cs = ctx.createBufferSource(); cs.buffer = getNoise(ctx);
+    const chp = ctx.createBiquadFilter(); chp.type='highpass'; chp.frequency.value = 3500;
+    const cg = ctx.createGain();
+    cg.gain.setValueAtTime(0.0001, t);
+    cg.gain.exponentialRampToValueAtTime(0.45, t + 0.001);
+    cg.gain.exponentialRampToValueAtTime(0.0001, t + 0.005);
+    cs.connect(chp).connect(cg).connect(out); cs.start(t); cs.stop(t + 0.015);
+  }
+  function v505Snare(ctx, t, out, tr) {
+    const m = semi(tr.tune);
+    const ns = ctx.createBufferSource(); ns.buffer = getNoise(ctx);
+    const nhp = ctx.createBiquadFilter(); nhp.type='highpass'; nhp.frequency.value = 2200*m;
+    const ng = ctx.createGain();
+    ng.gain.setValueAtTime(0.0001, t);
+    ng.gain.exponentialRampToValueAtTime(0.65, t + 0.001);
+    ng.gain.exponentialRampToValueAtTime(0.0001, t + 0.11);
+    ns.connect(nhp).connect(ng).connect(out); ns.start(t); ns.stop(t + 0.13);
+    const o = ctx.createOscillator(); o.type='triangle'; o.frequency.value = 280*m;
+    const og = ctx.createGain();
+    og.gain.setValueAtTime(0.0001, t);
+    og.gain.exponentialRampToValueAtTime(0.4, t + 0.001);
+    og.gain.exponentialRampToValueAtTime(0.0001, t + 0.07);
+    o.connect(og).connect(out); o.start(t); o.stop(t + 0.09);
+  }
+  function v505Clap(ctx, t, out, tr) {
+    const m = semi(tr.tune);
+    const burst = (t0, dur, peak) => {
+      const s = ctx.createBufferSource(); s.buffer = getNoise(ctx);
+      const bp = ctx.createBiquadFilter(); bp.type='bandpass';
+      bp.frequency.value = 1400*m; bp.Q.value = 1.4;
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0.0001, t0);
+      g.gain.exponentialRampToValueAtTime(peak, t0 + 0.001);
+      g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+      s.connect(bp).connect(g).connect(out); s.start(t0); s.stop(t0 + dur + 0.05);
+    };
+    burst(t,         0.01, 0.55);
+    burst(t + 0.012, 0.01, 0.55);
+    burst(t + 0.024, 0.18, 0.35);
+  }
+  function v505Hat(ctx, t, out, tr) {
+    const m = semi(tr.tune);
+    const s = ctx.createBufferSource(); s.buffer = getNoise(ctx);
+    const hp = ctx.createBiquadFilter(); hp.type='highpass'; hp.frequency.value = 8500*m;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.4, t + 0.001);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.04);
+    s.connect(hp).connect(g).connect(out); s.start(t); s.stop(t + 0.06);
+  }
+  function v505OHat(ctx, t, out, tr) {
+    const m = semi(tr.tune);
+    const s = ctx.createBufferSource(); s.buffer = getNoise(ctx);
+    const hp = ctx.createBiquadFilter(); hp.type='highpass'; hp.frequency.value = 8000*m;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.4, t + 0.002);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.32);
+    s.connect(hp).connect(g).connect(out); s.start(t); s.stop(t + 0.36);
+  }
+
+  // CR-8000 — vintage analog (1980)
+  function vCr8000Kick(ctx, t, out, tr) {
+    const m = semi(tr.tune);
+    const o = ctx.createOscillator(); o.type='sine';
+    o.frequency.setValueAtTime(115 * m, t);
+    o.frequency.exponentialRampToValueAtTime(50 * m, t + 0.07);
+    const og = ctx.createGain();
+    og.gain.setValueAtTime(0.0001, t);
+    og.gain.exponentialRampToValueAtTime(0.85, t + 0.004);
+    og.gain.exponentialRampToValueAtTime(0.0001, t + 0.45);
+    o.connect(og).connect(out); o.start(t); o.stop(t + 0.5);
+  }
+  function vCr8000Snare(ctx, t, out, tr) {
+    const m = semi(tr.tune);
+    const ns = ctx.createBufferSource(); ns.buffer = getNoise(ctx);
+    const nhp = ctx.createBiquadFilter(); nhp.type='highpass'; nhp.frequency.value = 900*m;
+    const nlp = ctx.createBiquadFilter(); nlp.type='lowpass';  nlp.frequency.value = 4500*m;
+    const ng = ctx.createGain();
+    ng.gain.setValueAtTime(0.0001, t);
+    ng.gain.exponentialRampToValueAtTime(0.55, t + 0.001);
+    ng.gain.exponentialRampToValueAtTime(0.0001, t + 0.14);
+    ns.connect(nhp).connect(nlp).connect(ng).connect(out); ns.start(t); ns.stop(t + 0.16);
+    const o = ctx.createOscillator(); o.type='triangle'; o.frequency.value = 200*m;
+    const og = ctx.createGain();
+    og.gain.setValueAtTime(0.0001, t);
+    og.gain.exponentialRampToValueAtTime(0.45, t + 0.001);
+    og.gain.exponentialRampToValueAtTime(0.0001, t + 0.1);
+    o.connect(og).connect(out); o.start(t); o.stop(t + 0.12);
+  }
+  function vCr8000Hat(ctx, t, out, tr) {
+    const m = semi(tr.tune);
+    const s = ctx.createBufferSource(); s.buffer = getNoise(ctx);
+    const hp = ctx.createBiquadFilter(); hp.type='highpass'; hp.frequency.value = 6500*m;
+    const lp = ctx.createBiquadFilter(); lp.type='lowpass';  lp.frequency.value = 11000*m;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.38, t + 0.001);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.045);
+    s.connect(hp).connect(lp).connect(g).connect(out); s.start(t); s.stop(t + 0.06);
+  }
+
+  // Oberheim DMX — chunky hip-hop drum machine (1981)
+  function vDmxKick(ctx, t, out, tr) {
+    const m = semi(tr.tune);
+    const o = ctx.createOscillator(); o.type='sine';
+    o.frequency.setValueAtTime(130 * m, t);
+    o.frequency.exponentialRampToValueAtTime(42 * m, t + 0.05);
+    const og = ctx.createGain();
+    og.gain.setValueAtTime(0.0001, t);
+    og.gain.exponentialRampToValueAtTime(1, t + 0.003);
+    og.gain.exponentialRampToValueAtTime(0.0001, t + 0.6);
+    o.connect(og).connect(out); o.start(t); o.stop(t + 0.65);
+    const o2 = ctx.createOscillator(); o2.type='triangle'; o2.frequency.value = 80*m;
+    const og2 = ctx.createGain();
+    og2.gain.setValueAtTime(0.0001, t);
+    og2.gain.exponentialRampToValueAtTime(0.5, t + 0.002);
+    og2.gain.exponentialRampToValueAtTime(0.0001, t + 0.15);
+    o2.connect(og2).connect(out); o2.start(t); o2.stop(t + 0.18);
+  }
+  function vDmxSnare(ctx, t, out, tr) {
+    const m = semi(tr.tune);
+    const o = ctx.createOscillator(); o.type='triangle';
+    o.frequency.setValueAtTime(280*m, t);
+    o.frequency.exponentialRampToValueAtTime(190*m, t + 0.05);
+    const og = ctx.createGain();
+    og.gain.setValueAtTime(0.0001, t);
+    og.gain.exponentialRampToValueAtTime(0.55, t + 0.001);
+    og.gain.exponentialRampToValueAtTime(0.0001, t + 0.15);
+    o.connect(og).connect(out); o.start(t); o.stop(t + 0.18);
+    const ns = ctx.createBufferSource(); ns.buffer = getNoise(ctx);
+    const nhp = ctx.createBiquadFilter(); nhp.type='highpass'; nhp.frequency.value = 1700*m;
+    const ng = ctx.createGain();
+    ng.gain.setValueAtTime(0.0001, t);
+    ng.gain.exponentialRampToValueAtTime(0.6, t + 0.001);
+    ng.gain.exponentialRampToValueAtTime(0.0001, t + 0.17);
+    ns.connect(nhp).connect(ng).connect(out); ns.start(t); ns.stop(t + 0.2);
+  }
+  function vDmxHat(ctx, t, out, tr) {
+    const m = semi(tr.tune);
+    const s = ctx.createBufferSource(); s.buffer = getNoise(ctx);
+    const hp = ctx.createBiquadFilter(); hp.type='highpass'; hp.frequency.value = 7500*m;
+    const bp = ctx.createBiquadFilter(); bp.type='bandpass'; bp.frequency.value = 9000*m; bp.Q.value = 1.2;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.45, t + 0.001);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.05);
+    s.connect(hp).connect(bp).connect(g).connect(out); s.start(t); s.stop(t + 0.07);
+  }
+
+  // Boss DR-55 — minimal analog (1980)
+  function vDr55Kick(ctx, t, out, tr) {
+    const m = semi(tr.tune);
+    const o = ctx.createOscillator(); o.type='sine';
+    o.frequency.setValueAtTime(105 * m, t);
+    o.frequency.exponentialRampToValueAtTime(58 * m, t + 0.06);
+    const og = ctx.createGain();
+    og.gain.setValueAtTime(0.0001, t);
+    og.gain.exponentialRampToValueAtTime(0.75, t + 0.004);
+    og.gain.exponentialRampToValueAtTime(0.0001, t + 0.3);
+    o.connect(og).connect(out); o.start(t); o.stop(t + 0.35);
+  }
+  function vDr55Snare(ctx, t, out, tr) {
+    const m = semi(tr.tune);
+    const ns = ctx.createBufferSource(); ns.buffer = getNoise(ctx);
+    const nhp = ctx.createBiquadFilter(); nhp.type='highpass'; nhp.frequency.value = 1100*m;
+    const ng = ctx.createGain();
+    ng.gain.setValueAtTime(0.0001, t);
+    ng.gain.exponentialRampToValueAtTime(0.5, t + 0.001);
+    ng.gain.exponentialRampToValueAtTime(0.0001, t + 0.11);
+    ns.connect(nhp).connect(ng).connect(out); ns.start(t); ns.stop(t + 0.14);
+  }
+  function vDr55Rim(ctx, t, out, tr) {
+    const m = semi(tr.tune);
+    const o = ctx.createOscillator(); o.type='triangle'; o.frequency.value = 1800*m;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.55, t + 0.001);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.04);
+    o.connect(g).connect(out); o.start(t); o.stop(t + 0.05);
+  }
+
   // Boss DR-110 — small, slightly compressed analog
   function vDrKick(ctx, t, out, tr) {
     const m = semi(tr.tune);
@@ -2142,6 +2461,21 @@
     // Boss DR-110
     'DR Kick': vDrKick, 'DR Snare': vDrSnare,
     'DR Hat': vDrHat, 'DR OHat': vDrOHat,
+    // TR-606
+    '606 Kick': v606Kick, '606 Snare': v606Snare,
+    '606 Hat': v606Hat, '606 OHat': v606OHat, '606 Cymbal': v606Cymbal,
+    // TR-727 Latin percussion
+    '727 Conga': v727Conga, '727 Bongo': v727Bongo, '727 Timbale': v727Timbale,
+    '727 Agogo': v727Agogo, '727 Whistle': v727Whistle,
+    // TR-505
+    '505 Kick': v505Kick, '505 Snare': v505Snare, '505 Clap': v505Clap,
+    '505 Hat': v505Hat, '505 OHat': v505OHat,
+    // CR-8000
+    'CR8000 Kick': vCr8000Kick, 'CR8000 Snare': vCr8000Snare, 'CR8000 Hat': vCr8000Hat,
+    // Oberheim DMX
+    'DMX Kick': vDmxKick, 'DMX Snare': vDmxSnare, 'DMX Hat': vDmxHat,
+    // Boss DR-55
+    'DR55 Kick': vDr55Kick, 'DR55 Snare': vDr55Snare, 'DR55 Rim': vDr55Rim,
   };
   const KIND_LABELS = {
     drum: 'Drum', bass: 'Bass', lead: 'Synth', chord: 'Chord',
@@ -4185,49 +4519,128 @@
       },
     },
     drum: {
-      'Boomy 808 Kick':   { voiceType: '808 Kick',   tune: -3 },
-      'Tight 808 Kick':   { voiceType: '808 Kick',   tune: 2 },
-      'Trap Kick':        { voiceType: '808 Kick',   tune: -7 },
-      'Classic 909 Kick': { voiceType: '909 Kick',   tune: 0 },
-      'Punchy 909 Kick':  { voiceType: '909 Kick',   tune: -2 },
-      'Hip-Hop Kick':     { voiceType: 'Linn Kick',  tune: -1 },
-      '707 Kick':         { voiceType: '707 Kick',   tune: 0 },
-      'Soft CR-78 Kick':  { voiceType: 'CR78 Kick',  tune: -2 },
-      'Cracky 909 Snare': { voiceType: '909 Snare',  tune: 3 },
-      'Big 808 Snare':    { voiceType: '808 Snare',  tune: -2 },
-      'LinnDrum Snare':   { voiceType: 'Linn Snare', tune: 0 },
-      '707 Snare':        { voiceType: '707 Snare',  tune: 0 },
-      '808 Clap':         { voiceType: '808 Clap',   tune: 0 },
-      'Bright 909 Hat':   { voiceType: '909 Hat',    tune: 3 },
-      'Dark 808 Hat':     { voiceType: '808 Hat',    tune: -4 },
-      'Lo-fi CR-78 Hat':  { voiceType: 'CR78 Hat',   tune: 0 },
-      'Open 909 Hat':     { voiceType: '909 OHat',   tune: 0 },
-      '909 Crash':        { voiceType: '909 Crash',  tune: 0 },
-      'Cowbell High':     { voiceType: '808 Cowbell',tune: 5 },
-      'Cowbell Low':      { voiceType: '808 Cowbell',tune: -3 },
-      'Floor Tom':        { voiceType: 'tom-low',    tune: -2 },
-      'Mid Tom':          { voiceType: 'tom-mid',    tune: 0 },
-      'High Tom':         { voiceType: 'tom-hi',     tune: 2 },
-      'Rim Click':        { voiceType: 'clave',      tune: 0 },
-      'High Cowbell':     { voiceType: '808 Cowbell',tune: 7 },
-      // ---- extra drum patches ----
-      'Sub 808 Kick':     { voiceType: '808 Kick',   tune: -5 },
-      'Distorted 909 Kick':{ voiceType: '909 Kick',  tune: 4 },
-      'Tuned Linn Kick':  { voiceType: 'Linn Kick',  tune: 3 },
-      'CR-78 Vintage Kick':{ voiceType: 'CR78 Kick', tune: 0 },
-      'DR Kick Low':      { voiceType: 'DR Kick',    tune: -3 },
-      'Tight 909 Snare':  { voiceType: '909 Snare',  tune: 5 },
-      'Soft CR-78 Snare': { voiceType: 'CR78 Snare', tune: 0 },
-      'DR Snare':         { voiceType: 'DR Snare',   tune: 0 },
-      'Hi 808 Clap':      { voiceType: '808 Clap',   tune: 3 },
-      'Mid 808 Clap':     { voiceType: '808 Clap',   tune: -2 },
-      'Vintage Crash':    { voiceType: 'crash',      tune: -3 },
-      'Bright Ride':      { voiceType: 'ride',       tune: 3 },
-      'Soft Ride':        { voiceType: 'ride',       tune: -3 },
-      'Tom Roll Low':     { voiceType: 'tom-low',    tune: -5 },
-      'Tom Roll High':    { voiceType: 'tom-hi',     tune: 5 },
-      'Clave High':       { voiceType: 'clave',      tune: 5 },
-      'Clave Low':        { voiceType: 'clave',      tune: -5 },
+      'TR-808': {
+        'Boomy Kick':       { voiceType: '808 Kick',   tune: -3 },
+        'Tight Kick':       { voiceType: '808 Kick',   tune: 2 },
+        'Trap Kick':        { voiceType: '808 Kick',   tune: -7 },
+        'Sub Kick':         { voiceType: '808 Kick',   tune: -5 },
+        'Big Snare':        { voiceType: '808 Snare',  tune: -2 },
+        'Bright Snare':     { voiceType: '808 Snare',  tune: 3 },
+        'Standard Clap':    { voiceType: '808 Clap',   tune: 0 },
+        'Hi Clap':          { voiceType: '808 Clap',   tune: 3 },
+        'Mid Clap':         { voiceType: '808 Clap',   tune: -2 },
+        'Dark Hat':         { voiceType: '808 Hat',    tune: -4 },
+        'Bright Hat':       { voiceType: '808 Hat',    tune: 3 },
+        'Open Hat':         { voiceType: '808 OHat',   tune: 0 },
+        'Cowbell High':     { voiceType: '808 Cowbell',tune: 5 },
+        'Cowbell Low':      { voiceType: '808 Cowbell',tune: -3 },
+        'Cowbell Higher':   { voiceType: '808 Cowbell',tune: 7 },
+      },
+      'TR-909': {
+        'Classic Kick':     { voiceType: '909 Kick',   tune: 0 },
+        'Punchy Kick':      { voiceType: '909 Kick',   tune: -2 },
+        'Distorted Kick':   { voiceType: '909 Kick',   tune: 4 },
+        'Cracky Snare':     { voiceType: '909 Snare',  tune: 3 },
+        'Tight Snare':      { voiceType: '909 Snare',  tune: 5 },
+        'Standard Snare':   { voiceType: '909 Snare',  tune: 0 },
+        'Bright Hat':       { voiceType: '909 Hat',    tune: 3 },
+        'Dark Hat':         { voiceType: '909 Hat',    tune: -3 },
+        'Open Hat':         { voiceType: '909 OHat',   tune: 0 },
+        'Classic Crash':    { voiceType: '909 Crash',  tune: 0 },
+        'Dark Crash':       { voiceType: '909 Crash',  tune: -4 },
+      },
+      'TR-707': {
+        'Classic Kick':     { voiceType: '707 Kick',   tune: 0 },
+        'Punch Kick':       { voiceType: '707 Kick',   tune: 2 },
+        'Crisp Snare':      { voiceType: '707 Snare',  tune: 0 },
+        'Bright Snare':     { voiceType: '707 Snare',  tune: 3 },
+        'Tight Hat':        { voiceType: '707 Hat',    tune: 0 },
+        'Open Hat':         { voiceType: '707 OHat',   tune: 0 },
+      },
+      'TR-606': {
+        'Classic Kick':     { voiceType: '606 Kick',   tune: 0 },
+        'Punchy Kick':      { voiceType: '606 Kick',   tune: 2 },
+        'Tight Snare':      { voiceType: '606 Snare',  tune: 0 },
+        'Hat':              { voiceType: '606 Hat',    tune: 0 },
+        'Open Hat':         { voiceType: '606 OHat',   tune: 0 },
+        'Cymbal':           { voiceType: '606 Cymbal', tune: 0 },
+        'Dark Cymbal':      { voiceType: '606 Cymbal', tune: -5 },
+      },
+      'TR-727': {
+        'Conga High':       { voiceType: '727 Conga',  tune: 4 },
+        'Conga Low':        { voiceType: '727 Conga',  tune: -3 },
+        'Bongo High':       { voiceType: '727 Bongo',  tune: 5 },
+        'Bongo Low':        { voiceType: '727 Bongo',  tune: -2 },
+        'Timbale':          { voiceType: '727 Timbale',tune: 0 },
+        'Agogo High':       { voiceType: '727 Agogo',  tune: 3 },
+        'Agogo Low':        { voiceType: '727 Agogo',  tune: -4 },
+        'Whistle':          { voiceType: '727 Whistle',tune: 0 },
+      },
+      'TR-505': {
+        'Kick':             { voiceType: '505 Kick',   tune: 0 },
+        'Boomy Kick':       { voiceType: '505 Kick',   tune: -3 },
+        'Snare':            { voiceType: '505 Snare',  tune: 0 },
+        'Tight Snare':      { voiceType: '505 Snare',  tune: 4 },
+        'Clap':             { voiceType: '505 Clap',   tune: 0 },
+        'Hat':              { voiceType: '505 Hat',    tune: 0 },
+        'Open Hat':         { voiceType: '505 OHat',   tune: 0 },
+      },
+      'LinnDrum': {
+        'Hip-Hop Kick':     { voiceType: 'Linn Kick',  tune: -1 },
+        'Tuned Kick':       { voiceType: 'Linn Kick',  tune: 3 },
+        'Classic Snare':    { voiceType: 'Linn Snare', tune: 0 },
+        'Bright Snare':     { voiceType: 'Linn Snare', tune: 3 },
+        'Hat':              { voiceType: 'Linn Hat',   tune: 0 },
+        'Open Hat':         { voiceType: 'Linn OHat',  tune: 0 },
+      },
+      'CR-78': {
+        'Soft Kick':        { voiceType: 'CR78 Kick',  tune: -2 },
+        'Vintage Kick':     { voiceType: 'CR78 Kick',  tune: 0 },
+        'Soft Snare':       { voiceType: 'CR78 Snare', tune: 0 },
+        'Lo-fi Hat':        { voiceType: 'CR78 Hat',   tune: 0 },
+        'Open Hat':         { voiceType: 'CR78 OHat',  tune: 0 },
+      },
+      'CR-8000': {
+        'Vintage Kick':     { voiceType: 'CR8000 Kick',tune: 0 },
+        'Boomy Kick':       { voiceType: 'CR8000 Kick',tune: -3 },
+        'Soft Snare':       { voiceType: 'CR8000 Snare',tune: 0 },
+        'Brighter Snare':   { voiceType: 'CR8000 Snare',tune: 3 },
+        'Mellow Hat':       { voiceType: 'CR8000 Hat', tune: 0 },
+      },
+      'DMX': {
+        'Chunky Kick':      { voiceType: 'DMX Kick',   tune: 0 },
+        'Punchy Kick':      { voiceType: 'DMX Kick',   tune: 2 },
+        'Sub Kick':         { voiceType: 'DMX Kick',   tune: -4 },
+        'Hip-Hop Snare':    { voiceType: 'DMX Snare',  tune: 0 },
+        'Bright Snare':     { voiceType: 'DMX Snare',  tune: 3 },
+        'Tight Hat':        { voiceType: 'DMX Hat',    tune: 0 },
+      },
+      'Boss DR-110': {
+        'Kick':             { voiceType: 'DR Kick',    tune: 0 },
+        'Kick Low':         { voiceType: 'DR Kick',    tune: -3 },
+        'Snare':            { voiceType: 'DR Snare',   tune: 0 },
+        'Hat':              { voiceType: 'DR Hat',     tune: 0 },
+        'Open Hat':         { voiceType: 'DR OHat',    tune: 0 },
+      },
+      'Boss DR-55': {
+        'Mini Kick':        { voiceType: 'DR55 Kick',  tune: 0 },
+        'Low Kick':         { voiceType: 'DR55 Kick',  tune: -4 },
+        'Mini Snare':       { voiceType: 'DR55 Snare', tune: 0 },
+        'Rim':              { voiceType: 'DR55 Rim',   tune: 0 },
+      },
+      'Toms & Cymbals': {
+        'Floor Tom':        { voiceType: 'tom-low',    tune: -2 },
+        'Mid Tom':          { voiceType: 'tom-mid',    tune: 0 },
+        'High Tom':         { voiceType: 'tom-hi',     tune: 2 },
+        'Tom Roll Low':     { voiceType: 'tom-low',    tune: -5 },
+        'Tom Roll High':    { voiceType: 'tom-hi',     tune: 5 },
+        'Vintage Crash':    { voiceType: 'crash',      tune: -3 },
+        'Bright Ride':      { voiceType: 'ride',       tune: 3 },
+        'Soft Ride':        { voiceType: 'ride',       tune: -3 },
+        'Rim Click':        { voiceType: 'clave',      tune: 0 },
+        'Clave High':       { voiceType: 'clave',      tune: 5 },
+        'Clave Low':        { voiceType: 'clave',      tune: -5 },
+      },
     },
   };
   function loadPresetStore() {
@@ -4499,23 +4912,42 @@
         const row = el('div', 'group-row');
         const sel = el('select');
         sel.className = 'preset-select';
+        // The drum kind organises factory presets per machine (nested object),
+        // every other kind keeps a flat map under a single Factory optgroup.
+        const isDrumGrouped = track.kind === 'drum';
         const refreshSel = () => {
           sel.innerHTML = '';
           const def = el('option', null, '(load…)'); def.value = '';
           sel.appendChild(def);
           const factory = (FACTORY_PRESETS[track.kind] || {});
           const user    = getPresetsForKind(track.kind);
-          const fNames = Object.keys(factory).sort();
-          const uNames = Object.keys(user).sort();
-          if (fNames.length) {
-            const og = document.createElement('optgroup');
-            og.label = 'Factory';
-            fNames.forEach(n => {
-              const op = el('option', null, n); op.value = 'f:' + n;
-              og.appendChild(op);
+          if (isDrumGrouped) {
+            Object.keys(factory).forEach(machine => {
+              const presets = factory[machine] || {};
+              const names = Object.keys(presets).sort();
+              if (!names.length) return;
+              const og = document.createElement('optgroup');
+              og.label = machine;
+              names.forEach(n => {
+                const op = el('option', null, n);
+                op.value = 'f:' + machine + '/' + n;
+                og.appendChild(op);
+              });
+              sel.appendChild(og);
             });
-            sel.appendChild(og);
+          } else {
+            const fNames = Object.keys(factory).sort();
+            if (fNames.length) {
+              const og = document.createElement('optgroup');
+              og.label = 'Factory';
+              fNames.forEach(n => {
+                const op = el('option', null, n); op.value = 'f:' + n;
+                og.appendChild(op);
+              });
+              sel.appendChild(og);
+            }
           }
+          const uNames = Object.keys(user).sort();
           if (uNames.length) {
             const og = document.createElement('optgroup');
             og.label = 'User';
@@ -4531,10 +4963,22 @@
           if (!sel.value) return;
           const idx = sel.value.indexOf(':');
           const src = sel.value.slice(0, idx);
-          const name = sel.value.slice(idx + 1);
-          const p = (src === 'f')
-            ? (FACTORY_PRESETS[track.kind] || {})[name]
-            : getPresetsForKind(track.kind)[name];
+          const rest = sel.value.slice(idx + 1);
+          let p;
+          if (src === 'f') {
+            if (isDrumGrouped) {
+              const sep = rest.indexOf('/');
+              if (sep > 0) {
+                const machine = rest.slice(0, sep);
+                const name    = rest.slice(sep + 1);
+                p = (FACTORY_PRESETS[track.kind] || {})[machine]?.[name];
+              }
+            } else {
+              p = (FACTORY_PRESETS[track.kind] || {})[rest];
+            }
+          } else {
+            p = getPresetsForKind(track.kind)[rest];
+          }
           if (!p) return;
           applyPresetToTrack(track, p);
           buildKnobs(track);
@@ -4658,13 +5102,19 @@
 
     if (track.kind === 'drum') {
       const drumGroups = {
-        'Generic':  ['kick','snare','clap','hat','open-hat','ride','crash','tom-hi','tom-mid','tom-low','clave'],
-        'TR-808':   ['808 Kick','808 Snare','808 Clap','808 Hat','808 OHat','808 Cowbell'],
-        'TR-909':   ['909 Kick','909 Snare','909 Hat','909 OHat','909 Crash'],
-        'TR-707':   ['707 Kick','707 Snare','707 Hat','707 OHat'],
-        'LinnDrum': ['Linn Kick','Linn Snare','Linn Hat','Linn OHat'],
-        'CR-78':    ['CR78 Kick','CR78 Snare','CR78 Hat','CR78 OHat'],
-        'Boss DR':  ['DR Kick','DR Snare','DR Hat','DR OHat'],
+        'Generic':   ['kick','snare','clap','hat','open-hat','ride','crash','tom-hi','tom-mid','tom-low','clave'],
+        'TR-606':    ['606 Kick','606 Snare','606 Hat','606 OHat','606 Cymbal'],
+        'TR-707':    ['707 Kick','707 Snare','707 Hat','707 OHat'],
+        'TR-727':    ['727 Conga','727 Bongo','727 Timbale','727 Agogo','727 Whistle'],
+        'TR-505':    ['505 Kick','505 Snare','505 Clap','505 Hat','505 OHat'],
+        'TR-808':    ['808 Kick','808 Snare','808 Clap','808 Hat','808 OHat','808 Cowbell'],
+        'TR-909':    ['909 Kick','909 Snare','909 Hat','909 OHat','909 Crash'],
+        'LinnDrum':  ['Linn Kick','Linn Snare','Linn Hat','Linn OHat'],
+        'CR-78':     ['CR78 Kick','CR78 Snare','CR78 Hat','CR78 OHat'],
+        'CR-8000':   ['CR8000 Kick','CR8000 Snare','CR8000 Hat'],
+        'DMX':       ['DMX Kick','DMX Snare','DMX Hat'],
+        'Boss DR-110': ['DR Kick','DR Snare','DR Hat','DR OHat'],
+        'Boss DR-55':  ['DR55 Kick','DR55 Snare','DR55 Rim'],
       };
       k.appendChild(group('Drum',
         selectField('Type', drumGroups, track.voiceType, v => {
