@@ -203,9 +203,7 @@
 
   /* Effects mode hides the tracks UI; .side reveals itself via the rule above. */
   body.mode-effects .add-row,
-  body.mode-effects #tracks,
-  body.mode-effects .mixer { display: none !important; }
-  body.mode-effects { padding-bottom: 24px !important; }
+  body.mode-effects #tracks { display: none !important; }
 
   /* mixing mode: hide everything except name + toggles */
   body.mode-mixing .steps-row,
@@ -656,7 +654,7 @@
     transition: width 60ms linear;
   }
 
-  /* ---- mixer / decks (locked to bottom) ---- */
+  /* ---- mixer / decks (locked to bottom, Effects tab only) ---- */
   .mixer {
     position: fixed;
     bottom: 0;
@@ -669,12 +667,15 @@
     margin: 0;
     max-height: 260px;
     overflow-y: auto;
+    display: none;
   }
+  body.mode-effects .mixer { display: block; }
   .mixer h2 { margin-bottom: 10px; }
   .mixer.collapsed { padding: 6px 20px; max-height: none; overflow: visible; }
   .mixer.collapsed > *:not(h2) { display: none; }
-  body { padding-bottom: 220px; }
-  body.mixer-collapsed { padding-bottom: 36px; }
+  body { padding-bottom: 24px; }
+  body.mode-effects { padding-bottom: 240px; }
+  body.mode-effects.mixer-collapsed { padding-bottom: 40px; }
   body.mode-mixing { padding-bottom: 0 !important; }
 
   /* collapsible modules */
@@ -723,30 +724,37 @@
     .layout { gap: 18px; }
   }
   @media (max-width: 720px) {
-    body { padding: 12px 10px 220px; }
-    body.mixer-collapsed { padding-bottom: 40px; }
+    body { padding: 12px 10px 12px; }
+    body.mode-effects { padding-bottom: 60vh; }
+    body.mode-effects.mixer-collapsed { padding-bottom: 40px; }
     .decks-grid { grid-template-columns: 1fr; }
     .mixer-xfade { width: 100%; min-width: 0; }
     .mixer-xfade input[type="range"] { width: 100%; }
-    .group { padding: 0 5px; }
     .knob input[type="range"] { width: 80px; }
     h1.title svg { height: 20px; }
-    .transport { gap: 10px; flex-wrap: wrap; row-gap: 8px; }
-    .add-row { gap: 6px; }
-    .mixer { max-height: 60vh; }
+    .transport { gap: 8px; flex-wrap: wrap; row-gap: 6px; }
+    .add-row { gap: 6px; flex-wrap: wrap; row-gap: 6px; }
+    .mixer { max-height: 50vh; }
+    body.mode-mixing #tracks { gap: 8px; }
   }
   @media (max-width: 560px) {
-    body { padding: 10px 8px 240px; }
-    body.mixer-collapsed { padding-bottom: 40px; }
-    .track { grid-template-columns: 90px 1fr; column-gap: 6px; }
+    body { padding: 10px 8px 10px; }
+    body.mode-effects { padding-bottom: 60vh; }
+    body.mode-effects.mixer-collapsed { padding-bottom: 40px; }
+    .track { grid-template-columns: 88px 1fr; column-gap: 6px; }
     h1.title svg { height: 18px; }
     .hint { display: none; }
-    .transport { gap: 6px; flex-wrap: wrap; }
-    .transport button.small, .mode-toggle button { padding: 6px 8px; font-size: 9px; }
-    .transport .field input[type="number"] { width: 50px; }
-    button.play { padding: 8px 14px; font-size: 12px; }
-    .knobs, .track-knobs { gap: 8px; }
-    .group { padding: 0 4px; gap: 6px; }
+    .folder-name { display: none; }
+    .transport { gap: 6px; flex-wrap: wrap; row-gap: 6px; }
+    .transport button.small, .mode-toggle button, .tabs button {
+      padding: 5px 8px;
+      font-size: 9px;
+      letter-spacing: 0.3px;
+    }
+    .transport .field input[type="number"] { width: 46px; }
+    button.play { padding: 6px 14px; font-size: 11px; }
+    .knobs, .track-knobs { gap: 6px; }
+    .group { padding: 2px 5px; gap: 4px; }
     .step { width: 22px; height: 22px; }
     .step-mini { height: 16px; }
     .step-mini button { font-size: 10px; }
@@ -754,17 +762,30 @@
     .toggle { width: 22px; height: 22px; font-size: 11px; }
     .mic-control { flex-wrap: wrap; gap: 8px; }
     .mic-control select.mic-device { max-width: 100%; flex: 1 1 100%; }
-    .knob input[type="range"] { width: 80px; }
+    .knob input[type="range"] { width: 72px; }
     .knob input[type="number"] { width: 44px; }
-    .track-name input.name-input { width: 70px; font-size: 10px; }
-    .add-row button.small { padding: 6px 8px; font-size: 9px; }
-    .mode-toggle button { padding: 6px 10px; }
+    .track-name input.name-input { width: 66px; font-size: 9px; }
+    .add-row button.small { padding: 5px 8px; font-size: 8px; }
+    body.mode-mixing .track { width: 88px; }
+    body.mode-mixing .toggles { max-width: 80px; }
+    .mix-fader { height: 150px; }
   }
   @media (max-width: 400px) {
-    .track { grid-template-columns: 80px 1fr; }
-    .track-name input.name-input { width: 60px; }
-    .step { width: 20px; height: 20px; }
+    body { padding: 8px 6px 8px; }
+    .track { grid-template-columns: 76px 1fr; column-gap: 4px; }
+    .track-name input.name-input { width: 56px; font-size: 9px; }
+    .step { width: 20px; height: 20px; font-size: 8px; }
     .lane-cell { width: 20px; height: 12px; }
+    .toggle { width: 20px; height: 20px; font-size: 10px; }
+    body.mode-mixing .track { width: 76px; }
+    body.mode-mixing .track-name input.name-input { width: 68px; }
+    body.mode-mixing .toggles { max-width: 68px; gap: 2px; }
+    body.mode-mixing .toggle { width: 16px; height: 16px; font-size: 8px; }
+    .mix-fader { width: 20px; height: 130px; }
+    .transport button.small, .mode-toggle button, .tabs button {
+      padding: 4px 6px;
+      font-size: 8px;
+    }
   }
 </style>
 </head>
