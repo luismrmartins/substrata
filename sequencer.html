@@ -293,9 +293,12 @@
   body.mode-mixing .mix-eq-wrap {
     display: flex;
     flex-direction: column;
-    gap: 3px;
-    margin-top: 4px;
+    gap: 6px;
+    margin-top: 6px;
     width: 100%;
+    padding: 6px;
+    border: 1px solid var(--line);
+    border-radius: 3px;
   }
   body.mode-mixing .mix-strip {
     display: flex;
@@ -305,19 +308,33 @@
     margin-top: 6px;
   }
   body.mode-mixing .mix-fader-wrap { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+  /* Each EQ band stacks label-and-value above the slider so the slider gets
+     the full strip width — at 96px channel width that means ~80px of slider
+     instead of the ~58px we'd get from a single inline row. */
   .mix-eq-row {
-    display: flex;
+    display: grid;
+    grid-template-columns: 1fr auto;
     align-items: center;
-    gap: 4px;
+    column-gap: 4px;
+    row-gap: 1px;
     font-size: 8px;
     color: var(--muted);
     width: 100%;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
   }
-  .mix-eq-row span { width: 14px; text-align: center; }
+  .mix-eq-row span.eq-label { text-align: left; }
+  .mix-eq-row span.eq-val {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+    color: var(--text);
+  }
   .mix-eq-row input[type="range"] {
-    flex: 1;
-    height: 10px;
+    grid-column: 1 / -1;
+    width: 100%;
+    height: 14px;
     accent-color: var(--text);
+    margin: 0;
   }
   .mix-meter {
     width: 8px;
@@ -4948,12 +4965,20 @@
 
     // 3-band channel EQ (Mix mode only — hidden by CSS otherwise)
     const eqWrap = el('div', 'mix-eq-wrap');
+    const fmtEq = v => (v > 0 ? '+' : '') + v.toFixed(1);
     const makeEqRow = (label, val, onChange) => {
       const row = el('div', 'mix-eq-row');
-      row.appendChild(el('span', null, label));
+      const lab = el('span', 'eq-label', label);
+      const valEl = el('span', 'eq-val', fmtEq(val));
+      row.appendChild(lab);
+      row.appendChild(valEl);
       const r = el('input'); r.type='range';
       r.min = -15; r.max = 15; r.step = 0.5; r.value = val;
-      r.addEventListener('input', () => onChange(parseFloat(r.value)));
+      r.addEventListener('input', () => {
+        const v = parseFloat(r.value);
+        valEl.textContent = fmtEq(v);
+        onChange(v);
+      });
       row.appendChild(r);
       return row;
     };
@@ -6425,12 +6450,20 @@
     wrap.appendChild(meta);
 
     const eqWrap = el('div', 'mix-eq-wrap');
+    const fmtMEq = v => (v > 0 ? '+' : '') + v.toFixed(1);
     const makeRow = (label, val, onChange) => {
       const row = el('div', 'mix-eq-row');
-      row.appendChild(el('span', null, label));
+      const lab = el('span', 'eq-label', label);
+      const valEl = el('span', 'eq-val', fmtMEq(val));
+      row.appendChild(lab);
+      row.appendChild(valEl);
       const r = el('input'); r.type='range';
       r.min = -15; r.max = 15; r.step = 0.5; r.value = val;
-      r.addEventListener('input', () => onChange(parseFloat(r.value)));
+      r.addEventListener('input', () => {
+        const v = parseFloat(r.value);
+        valEl.textContent = fmtMEq(v);
+        onChange(v);
+      });
       row.appendChild(r);
       return row;
     };
