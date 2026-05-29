@@ -239,15 +239,22 @@
     width: 100%;
   }
   body.mode-mixing .track-name {
-    font-size: 9px;
+    font-size: 10px;
     text-align: center;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
     max-width: 100%;
     cursor: default;
+    font-weight: 500;
   }
-  body.mode-mixing .track-name input.name-input { width: 78px; text-align: center; font-size: 9px; }
+  body.mode-mixing .track-name .chev { display: none; }
+  body.mode-mixing .track-name input.name-input {
+    width: 82px;
+    text-align: center;
+    font-size: 10px;
+    border-bottom: 1px solid var(--line);
+  }
   body.mode-mixing .toggles {
     flex-wrap: wrap;
     justify-content: center;
@@ -279,6 +286,64 @@
     font-size: 8px;
     color: var(--muted);
     font-variant-numeric: tabular-nums;
+  }
+
+  /* Mix-mode 3-band EQ + meter + master strip */
+  .mix-eq-wrap, .mix-strip { display: none; }
+  body.mode-mixing .mix-eq-wrap {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    margin-top: 4px;
+    width: 100%;
+  }
+  body.mode-mixing .mix-strip {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 4px;
+    margin-top: 6px;
+  }
+  body.mode-mixing .mix-fader-wrap { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+  .mix-eq-row {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 8px;
+    color: var(--muted);
+    width: 100%;
+  }
+  .mix-eq-row span { width: 14px; text-align: center; }
+  .mix-eq-row input[type="range"] {
+    flex: 1;
+    height: 10px;
+    accent-color: var(--text);
+  }
+  .mix-meter {
+    width: 8px;
+    height: 180px;
+    background: var(--line);
+    border-radius: 2px;
+    position: relative;
+    overflow: hidden;
+  }
+  .mix-meter-fill {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 0%;
+    background: linear-gradient(to top, #2ecc40 0%, #2ecc40 55%, #ffdc00 75%, #ff4136 92%);
+  }
+  .master-strip { display: none; }
+  body.mode-mixing .master-strip {
+    display: flex !important;
+    border-left: 3px solid var(--accent);
+  }
+  body.mode-mixing .master-strip .track-name {
+    color: var(--accent);
+    font-weight: 600;
+    font-size: 11px;
   }
 
   .track-name input.name-input {
@@ -814,8 +879,9 @@
         </div>
         <button id="folder" class="small" title="set project folder">📁 Folder</button>
         <span id="folder-name" class="folder-name">no folder</span>
-        <button id="save" class="small">Save</button>
+        <button id="save" class="small" title="Save (shift-click to rename)">Save</button>
         <button id="load" class="small">Load</button>
+        <span id="project-name" class="folder-name"></span>
         <button id="theme" class="small" title="toggle dark/light">☼</button>
         <button id="fullscreen" class="small" title="toggle full screen">⛶</button>
       </div>
@@ -845,6 +911,7 @@
       <div class="module" id="flanger"></div>
       <div class="module" id="bitcrush"></div>
       <div class="module" id="tape"></div>
+      <div class="module" id="lofi"></div>
       <div class="module" id="lpfilter"></div>
       <div class="module" id="hpfilter"></div>
     </aside>
@@ -856,6 +923,11 @@
   const tracksEl = document.getElementById('tracks');
 
   let projectDir = null;
+  let currentProjectName = '';
+  function updateProjectNameDisplay() {
+    const el = document.getElementById('project-name');
+    if (el) el.textContent = currentProjectName || '';
+  }
 
   async function pickProjectDir() {
     if (!window.showDirectoryPicker) {
@@ -2504,6 +2576,7 @@
       group: 0,
       swing: 0,
       mono: false,
+      eqLow: 0, eqMid: 0, eqHigh: 0,
       trkLfoRate: 0.5, trkLfoShape: 'sine',
       trkLfoVolDepth: 0, trkLfoPanDepth: 0,
       expanded: true,
@@ -2606,12 +2679,16 @@
   }
 
   // ---------- audio graph ----------
-  let masterIn, masterOut, eqLow, eqMid, eqHigh, warmLow, warmHigh, warmShaper, compressor, masterLP, masterHP, masterLimiter;
+  let masterIn, masterOut, eqLow, eqMid, eqHigh, warmLow, warmHigh, warmShaper, compressor, masterLP, masterHP, masterLimiter, masterMeter;
   let delayBus, delayNode, delayFb, delayWet;
   let reverbBus, reverbNode, reverbWet;
   let chorusBus, chorusDelL, chorusDelR, chorusLfoL, chorusLfoR, chorusModL, chorusModR, chorusWet;
   let flangerBus, flangerDel, flangerFb, flangerLfo, flangerMod, flangerWet;
   let bitcrushBus, bitcrushProc, bitcrushWet;
+  let lofiIn, lofiOut, lofiDry, lofiWet;
+  let lofiSat, lofiLP;
+  let lofiWobbleDelay, lofiWobbleLfo, lofiWobbleDepth;
+  let lofiDustSource, lofiDustGain;
   let tapeIn, tapeOut, tapeDry, tapeWet, tapeDryDelay;
   let tapeWowDelay, tapeWowLfo, tapeFlutterLfo, tapeWowDepth, tapeFlutterDepth;
   let tapeFilterHP, tapeFilterLP, tapeSatNode;
@@ -2644,8 +2721,25 @@
   const compCfg     = { threshold: -18, ratio: 4, attack: 0.005, release: 0.18, knee: 6 };
   const duckCfg     = { sourceIndex: -1, attack: 0.012, release: 0.22 };
   const tapeCfg     = { wow: 0, flutter: 0, crackle: 0, hiss: 0, sat: 0, tone: 0, wet: 0 };
+  const lofiCfg     = { drive: 0, hiCut: 12000, wobble: 0, dust: 0, wet: 0 };
   const lpfCfg      = { freq: 22000, q: 0.7 };
   const hpfCfg      = { freq: 20, q: 0.7 };
+
+  function makeLofiSatCurve(amount) {
+    const n = 4096;
+    const curve = new Float32Array(n);
+    if (amount <= 0) {
+      for (let i = 0; i < n; i++) curve[i] = (i / (n - 1)) * 2 - 1;
+      return curve;
+    }
+    const drive = 1 + amount * 6;
+    const norm = Math.tanh(drive);
+    for (let i = 0; i < n; i++) {
+      const x = (i / (n - 1)) * 2 - 1;
+      curve[i] = Math.tanh(x * drive) / norm;
+    }
+    return curve;
+  }
   const decks = {
     A: { name: '', vol: 0.8, low: 0, mid: 0, high: 0, playing: false, buffer: null, source: null },
     B: { name: '', vol: 0.8, low: 0, mid: 0, high: 0, playing: false, buffer: null, source: null },
@@ -2807,6 +2901,37 @@
 
     tapeWet.connect(tapeOut);
 
+    // ----- Lo-Fi House master effect -----
+    lofiIn  = audioCtx.createGain();
+    lofiOut = audioCtx.createGain();
+    lofiDry = audioCtx.createGain(); lofiDry.gain.value = 1 - lofiCfg.wet;
+    lofiWet = audioCtx.createGain(); lofiWet.gain.value = lofiCfg.wet;
+    lofiSat = audioCtx.createWaveShaper();
+    lofiSat.curve = makeLofiSatCurve(lofiCfg.drive);
+    lofiSat.oversample = '4x';
+    lofiLP  = audioCtx.createBiquadFilter();
+    lofiLP.type = 'lowpass';
+    lofiLP.frequency.value = lofiCfg.hiCut;
+    lofiWobbleDelay = audioCtx.createDelay(0.05);
+    lofiWobbleDelay.delayTime.value = 0.006;
+    lofiWobbleLfo = audioCtx.createOscillator();
+    lofiWobbleLfo.type = 'sine';
+    lofiWobbleLfo.frequency.value = 4.5;
+    lofiWobbleDepth = audioCtx.createGain();
+    lofiWobbleDepth.gain.value = lofiCfg.wobble * 0.005;
+    lofiWobbleLfo.connect(lofiWobbleDepth).connect(lofiWobbleDelay.delayTime);
+    lofiWobbleLfo.start();
+    lofiIn.connect(lofiDry).connect(lofiOut);
+    lofiIn.connect(lofiSat).connect(lofiLP).connect(lofiWobbleDelay).connect(lofiWet);
+    lofiDustSource = audioCtx.createBufferSource();
+    lofiDustSource.buffer = makeCrackleBuffer(audioCtx);
+    lofiDustSource.loop = true;
+    lofiDustGain = audioCtx.createGain();
+    lofiDustGain.gain.value = lofiCfg.dust * 0.35;
+    lofiDustSource.connect(lofiDustGain).connect(lofiWet);
+    lofiDustSource.start();
+    lofiWet.connect(lofiOut);
+
     // Insert filters (LP + HP) sit just before the brick-wall limiter.
     masterLP = audioCtx.createBiquadFilter(); masterLP.type = 'lowpass';
     masterLP.frequency.value = lpfCfg.freq; masterLP.Q.value = lpfCfg.q;
@@ -2814,11 +2939,15 @@
     masterHP.frequency.value = hpfCfg.freq; masterHP.Q.value = hpfCfg.q;
 
     masterOut  = audioCtx.createGain();         masterOut.gain.value = master.vol;
+    masterMeter = audioCtx.createAnalyser();    masterMeter.fftSize = 256;
     masterIn.connect(eqLow).connect(eqMid).connect(eqHigh)
             .connect(warmLow).connect(warmHigh).connect(warmShaper)
             .connect(compressor).connect(tapeIn);
-    tapeOut.connect(masterLP).connect(masterHP).connect(masterLimiter)
+    tapeOut.connect(lofiIn);
+    lofiOut.connect(masterLP).connect(masterHP).connect(masterLimiter)
            .connect(masterOut).connect(audioCtx.destination);
+    masterOut.connect(masterMeter);
+    startMeterLoop();
 
     delayBus  = audioCtx.createGain();
     delayNode = audioCtx.createDelay(2.0); delayNode.delayTime.value = delayCfg.time;
@@ -4815,7 +4944,39 @@
     buildKnobs(track);
     wrap.appendChild(knobs);
 
-    // Vertical fader for mix-mode channel strip (hidden in other modes)
+    // 3-band channel EQ (Mix mode only — hidden by CSS otherwise)
+    const eqWrap = el('div', 'mix-eq-wrap');
+    const makeEqRow = (label, val, onChange) => {
+      const row = el('div', 'mix-eq-row');
+      row.appendChild(el('span', null, label));
+      const r = el('input'); r.type='range';
+      r.min = -15; r.max = 15; r.step = 0.5; r.value = val;
+      r.addEventListener('input', () => onChange(parseFloat(r.value)));
+      row.appendChild(r);
+      return row;
+    };
+    eqWrap.appendChild(makeEqRow('HI', track.eqHigh || 0, v => {
+      track.eqHigh = v;
+      if (track.trkEqHigh) track.trkEqHigh.gain.setTargetAtTime(v, audioCtx.currentTime, 0.02);
+    }));
+    eqWrap.appendChild(makeEqRow('MD', track.eqMid || 0, v => {
+      track.eqMid = v;
+      if (track.trkEqMid) track.trkEqMid.gain.setTargetAtTime(v, audioCtx.currentTime, 0.02);
+    }));
+    eqWrap.appendChild(makeEqRow('LO', track.eqLow || 0, v => {
+      track.eqLow = v;
+      if (track.trkEqLow) track.trkEqLow.gain.setTargetAtTime(v, audioCtx.currentTime, 0.02);
+    }));
+    wrap.appendChild(eqWrap);
+
+    // Channel strip: meter + vertical fader (Mix mode only)
+    const strip = el('div', 'mix-strip');
+    const meter = el('div', 'mix-meter');
+    const meterFill = el('div', 'mix-meter-fill');
+    meter.appendChild(meterFill);
+    track._meterFill = meterFill;
+    strip.appendChild(meter);
+
     const mixFaderWrap = el('div', 'mix-fader-wrap');
     const mixFader = el('input', 'mix-fader');
     mixFader.type = 'range';
@@ -4832,7 +4993,8 @@
     mixFaderWrap.appendChild(mixVolLabel);
     track._mixFader = mixFader;
     track._mixVolLabel = mixVolLabel;
-    wrap.appendChild(mixFaderWrap);
+    strip.appendChild(mixFaderWrap);
+    wrap.appendChild(strip);
 
     tracksEl.appendChild(wrap);
     if (track.kind !== 'mic') rebuildSteps(track);
@@ -4984,9 +5146,14 @@
           buildKnobs(track);
         });
         const saveBtn = el('button', 'mic-btn', 'Save');
-        saveBtn.title = 'save current sound as a user preset';
-        saveBtn.addEventListener('click', () => {
-          // suggest current value (strip src prefix) if it's a user preset
+        saveBtn.title = 'save current sound as a user preset (shift-click to save as new)';
+        saveBtn.addEventListener('click', (e) => {
+          // If a user preset is selected and shift is not held, overwrite silently
+          if (!e.shiftKey && sel.value && sel.value.startsWith('u:')) {
+            const name = sel.value.slice(2);
+            setPreset(track.kind, name, getTrackPresetParams(track));
+            return;
+          }
           let suggested = '';
           if (sel.value && sel.value.startsWith('u:')) suggested = sel.value.slice(2);
           const name = window.prompt('Save ' + track.kind + ' preset as:', suggested);
@@ -5844,6 +6011,33 @@
     }, v => (v * 1000).toFixed(0));
   }
 
+  function buildLoFi() {
+    const m = document.getElementById('lofi');
+    m.innerHTML = '';
+    m.appendChild(el('h2', null, 'Lo-Fi House'));
+    sideRow(m, 'Drive', 0, 1, 0.01, lofiCfg.drive, v => {
+      lofiCfg.drive = v;
+      if (lofiSat) lofiSat.curve = makeLofiSatCurve(v);
+    }, v => v.toFixed(2));
+    sideRow(m, 'HiCut', 500, 20000, 10, lofiCfg.hiCut, v => {
+      lofiCfg.hiCut = v;
+      if (lofiLP) lofiLP.frequency.setTargetAtTime(v, audioCtx.currentTime, 0.02);
+    }, v => Math.round(v));
+    sideRow(m, 'Wobble', 0, 1, 0.01, lofiCfg.wobble, v => {
+      lofiCfg.wobble = v;
+      if (lofiWobbleDepth) lofiWobbleDepth.gain.setTargetAtTime(v * 0.005, audioCtx.currentTime, 0.02);
+    }, v => v.toFixed(2));
+    sideRow(m, 'Dust', 0, 1, 0.01, lofiCfg.dust, v => {
+      lofiCfg.dust = v;
+      if (lofiDustGain) lofiDustGain.gain.setTargetAtTime(v * 0.35, audioCtx.currentTime, 0.02);
+    }, v => v.toFixed(2));
+    sideRow(m, 'Wet', 0, 1, 0.01, lofiCfg.wet, v => {
+      lofiCfg.wet = v;
+      if (lofiDry) lofiDry.gain.setTargetAtTime(1 - v, audioCtx.currentTime, 0.02);
+      if (lofiWet) lofiWet.gain.setTargetAtTime(v, audioCtx.currentTime, 0.02);
+    }, v => v.toFixed(2));
+  }
+
   function buildLPFilter() {
     const m = document.getElementById('lpfilter');
     m.innerHTML = '';
@@ -6073,14 +6267,24 @@
     t.volNode      = audioCtx.createGain();   t.volNode.gain.value      = t.volume;
     t.trkLfoMod    = audioCtx.createGain();   t.trkLfoMod.gain.value    = 1; // tremolo carrier
     t.trkPanNode   = audioCtx.createStereoPanner(); t.trkPanNode.pan.value = 0;
+    // 3-band channel EQ (shown on the Mix tab strip)
+    t.trkEqLow  = audioCtx.createBiquadFilter(); t.trkEqLow.type ='lowshelf';  t.trkEqLow.frequency.value  = 200;  t.trkEqLow.gain.value  = t.eqLow  || 0;
+    t.trkEqMid  = audioCtx.createBiquadFilter(); t.trkEqMid.type ='peaking';   t.trkEqMid.frequency.value  = 1000; t.trkEqMid.Q.value = 0.8; t.trkEqMid.gain.value = t.eqMid || 0;
+    t.trkEqHigh = audioCtx.createBiquadFilter(); t.trkEqHigh.type='highshelf'; t.trkEqHigh.frequency.value = 5000; t.trkEqHigh.gain.value = t.eqHigh || 0;
     t.duckGain     = audioCtx.createGain();   t.duckGain.gain.value     = 1;
     t.delaySendN   = audioCtx.createGain();   t.delaySendN.gain.value   = t.delaySend;
     t.reverbSendN  = audioCtx.createGain();   t.reverbSendN.gain.value  = t.reverbSend;
     t.chorusSendN  = audioCtx.createGain();   t.chorusSendN.gain.value  = t.chorusSend;
     t.flangerSendN = audioCtx.createGain();   t.flangerSendN.gain.value = t.flangerSend;
     t.bitcrushSendN= audioCtx.createGain();   t.bitcrushSendN.gain.value= t.bitcrushSend;
+    // Meter analyser (cheap, parallel observer after vol/EQ)
+    t.trkMeter = audioCtx.createAnalyser();
+    t.trkMeter.fftSize = 256;
     t.input.connect(t.volNode);
-    t.volNode.connect(t.trkLfoMod).connect(t.trkPanNode).connect(t.duckGain);
+    t.volNode.connect(t.trkLfoMod).connect(t.trkPanNode)
+             .connect(t.trkEqLow).connect(t.trkEqMid).connect(t.trkEqHigh)
+             .connect(t.duckGain);
+    t.duckGain.connect(t.trkMeter);
     t.duckGain.connect(masterIn);
     t.duckGain.connect(t.delaySendN).connect(delayBus);
     t.duckGain.connect(t.reverbSendN).connect(reverbBus);
@@ -6124,7 +6328,7 @@
     if (t.stream) { try { t.stream.getTracks().forEach(s => s.stop()); } catch (e) {} t.stream = null; }
     if (t._scopeStop !== undefined) t._scopeStop = true;
     if (t.trkLfo) { try { t.trkLfo.stop(); } catch (e) {} try { t.trkLfo.disconnect(); } catch (e) {} t.trkLfo = null; }
-    ['trkLfoVolG','trkLfoPanG','trkLfoMod','trkPanNode',
+    ['trkLfoVolG','trkLfoPanG','trkLfoMod','trkPanNode','trkEqLow','trkEqMid','trkEqHigh','trkMeter',
      'micSource','inputGainN','hpf','micGate','analyser','input','volNode','duckGain',
      'delaySendN','reverbSendN','chorusSendN','flangerSendN','bitcrushSendN']
       .forEach(k => { if (t[k]) { try { t[k].disconnect(); } catch (e) {} t[k] = null; } });
@@ -6156,12 +6360,14 @@
   }
   function rebuildTracksUI() {
     tracksEl.innerHTML = '';
+    _masterMeterFill = null;
     if (tracks.length === 0) {
       tracksEl.appendChild(el('div', 'empty-hint',
         'No tracks yet — use the "Add track" buttons above to add a Drum, Bass, Synth, Chord, Mic, or Granular channel.'));
       return;
     }
     tracks.forEach(buildTrack);
+    buildMasterStrip();
   }
   function rebuildDuckerSourceOptions() {
     const m = document.getElementById('ducker');
@@ -6172,6 +6378,98 @@
     if (typeof makeCollapsible === 'function') {
       makeCollapsible(m, { collapsed: wasCollapsed });
     }
+  }
+
+  // ---------- meter loop (Mix tab + master strip) ----------
+  let _meterLoopRunning = false;
+  let _masterMeterFill  = null;
+  function meterPeak(analyser, buf) {
+    analyser.getFloatTimeDomainData(buf);
+    let max = 0;
+    for (let i = 0; i < buf.length; i++) {
+      const v = Math.abs(buf[i]);
+      if (v > max) max = v;
+    }
+    return max;
+  }
+  function startMeterLoop() {
+    if (_meterLoopRunning) return;
+    _meterLoopRunning = true;
+    const buf = new Float32Array(128);
+    const loop = () => {
+      if (!audioCtx) { _meterLoopRunning = false; return; }
+      for (const t of tracks) {
+        if (t.trkMeter && t._meterFill) {
+          const peak = meterPeak(t.trkMeter, buf);
+          t._meterFill.style.height = Math.min(100, peak * 130) + '%';
+        }
+      }
+      if (masterMeter && _masterMeterFill) {
+        const peak = meterPeak(masterMeter, buf);
+        _masterMeterFill.style.height = Math.min(100, peak * 130) + '%';
+      }
+      requestAnimationFrame(loop);
+    };
+    requestAnimationFrame(loop);
+  }
+
+  // ---------- master channel strip (Mix tab) ----------
+  function buildMasterStrip() {
+    const wrap = el('div', 'track master-strip');
+    const meta = el('div', 'track-meta');
+    const name = el('div', 'track-name');
+    name.appendChild(el('span', null, 'MASTER'));
+    meta.appendChild(name);
+    wrap.appendChild(meta);
+
+    const eqWrap = el('div', 'mix-eq-wrap');
+    const makeRow = (label, val, onChange) => {
+      const row = el('div', 'mix-eq-row');
+      row.appendChild(el('span', null, label));
+      const r = el('input'); r.type='range';
+      r.min = -15; r.max = 15; r.step = 0.5; r.value = val;
+      r.addEventListener('input', () => onChange(parseFloat(r.value)));
+      row.appendChild(r);
+      return row;
+    };
+    eqWrap.appendChild(makeRow('HI', master.high, v => {
+      master.high = v;
+      if (eqHigh) eqHigh.gain.setTargetAtTime(v, audioCtx.currentTime, 0.02);
+    }));
+    eqWrap.appendChild(makeRow('MD', master.mid, v => {
+      master.mid = v;
+      if (eqMid) eqMid.gain.setTargetAtTime(v, audioCtx.currentTime, 0.02);
+    }));
+    eqWrap.appendChild(makeRow('LO', master.low, v => {
+      master.low = v;
+      if (eqLow) eqLow.gain.setTargetAtTime(v, audioCtx.currentTime, 0.02);
+    }));
+    wrap.appendChild(eqWrap);
+
+    const strip = el('div', 'mix-strip');
+    const meter = el('div', 'mix-meter');
+    const meterFill = el('div', 'mix-meter-fill');
+    meter.appendChild(meterFill);
+    _masterMeterFill = meterFill;
+    strip.appendChild(meter);
+
+    const faderWrap = el('div', 'mix-fader-wrap');
+    const fader = el('input', 'mix-fader');
+    fader.type = 'range';
+    fader.min = 0; fader.max = 1.2; fader.step = 0.01; fader.value = master.vol;
+    const label = el('span', 'mix-vol-val', Number(master.vol).toFixed(2));
+    fader.addEventListener('input', () => {
+      const v = parseFloat(fader.value);
+      master.vol = v;
+      label.textContent = v.toFixed(2);
+      if (masterOut) masterOut.gain.setTargetAtTime(v, audioCtx.currentTime, 0.01);
+    });
+    faderWrap.appendChild(fader);
+    faderWrap.appendChild(label);
+    strip.appendChild(faderWrap);
+    wrap.appendChild(strip);
+
+    tracksEl.appendChild(wrap);
   }
 
   // ---------- mixer (dual deck) ----------
@@ -6348,6 +6646,7 @@
   // ---------- save / load ----------
   const SAVE_KEYS = {
     common: ['name','kind','steps','pattern','volume','mute','solo','armed','group','swing','mono','noteLen','expanded',
+             'eqLow','eqMid','eqHigh',
              'delaySend','reverbSend','chorusSend','flangerSend','bitcrushSend','duckAmt',
              'trkLfoRate','trkLfoShape','trkLfoVolDepth','trkLfoPanDepth'],
     drum:   ['voiceType','tune'],
@@ -6391,7 +6690,7 @@
       version: 1,
       bpm: parseFloat(bpmInput.value),
       tracks: tracks.map(serializeTrack),
-      master, delayCfg, reverbCfg, chorusCfg, flangerCfg, bitcrushCfg, compCfg, duckCfg, tapeCfg, lpfCfg, hpfCfg,
+      master, delayCfg, reverbCfg, chorusCfg, flangerCfg, bitcrushCfg, compCfg, duckCfg, tapeCfg, lofiCfg, lpfCfg, hpfCfg,
       decks: { A: deckSnap(decks.A), B: deckSnap(decks.B), xfade: decks.xfade },
     };
   }
@@ -6446,6 +6745,12 @@
     if (tapeWet) tapeWet.gain.value = tapeCfg.wet;
     if (masterLP) { masterLP.frequency.value = lpfCfg.freq; masterLP.Q.value = lpfCfg.q; }
     if (masterHP) { masterHP.frequency.value = hpfCfg.freq; masterHP.Q.value = hpfCfg.q; }
+    if (lofiSat) lofiSat.curve = makeLofiSatCurve(lofiCfg.drive);
+    if (lofiLP)  lofiLP.frequency.value = lofiCfg.hiCut;
+    if (lofiWobbleDepth) lofiWobbleDepth.gain.value = lofiCfg.wobble * 0.005;
+    if (lofiDustGain)    lofiDustGain.gain.value    = lofiCfg.dust * 0.35;
+    if (lofiDry) lofiDry.gain.value = 1 - lofiCfg.wet;
+    if (lofiWet) lofiWet.gain.value = lofiCfg.wet;
     ['A','B'].forEach(k => {
       const d = decks[k];
       if (d.gain)   d.gain.gain.value      = d.vol;
@@ -6457,23 +6762,31 @@
   }
   function rebuildAllUI() {
     tracksEl.innerHTML = '';
-    ['master','comp','ducker','delay','reverb','chorus','flanger','bitcrush','tape','lpfilter','hpfilter','mixer'].forEach(id => {
+    ['master','comp','ducker','delay','reverb','chorus','flanger','bitcrush','tape','lofi','lpfilter','hpfilter','mixer'].forEach(id => {
       const node = document.getElementById(id);
       if (node) node.innerHTML = '';
     });
     rebuildTracksUI();
     buildMaster(); buildComp(); buildDucker();
     buildDelay(); buildReverb();
-    buildChorus(); buildFlanger(); buildBitcrush(); buildTape();
+    buildChorus(); buildFlanger(); buildBitcrush(); buildTape(); buildLoFi();
   buildLPFilter(); buildHPFilter();
     buildMixer();
     applyCollapsibles();
   }
-  async function saveProject() {
-    const ts = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
-    const name = window.prompt('Save project as:', 'substrata-' + ts);
-    if (!name) return;
-    const filename = /\.json$/i.test(name) ? name : (name + '.json');
+  async function saveProject(forceRename) {
+    let filename;
+    if (currentProjectName && !forceRename) {
+      filename = currentProjectName;  // overwrite silently
+    } else {
+      const ts = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
+      const suggested = currentProjectName || ('substrata-' + ts);
+      const name = window.prompt('Save project as:', suggested);
+      if (!name) return;
+      filename = /\.json$/i.test(name) ? name : (name + '.json');
+    }
+    currentProjectName = filename;
+    updateProjectNameDisplay();
     const data = JSON.stringify(getProjectState(), null, 2);
 
     if (projectDir) {
@@ -6519,6 +6832,7 @@
     if (data.compCfg)     Object.assign(compCfg, data.compCfg);
     if (data.duckCfg)     Object.assign(duckCfg, data.duckCfg);
     if (data.tapeCfg)     Object.assign(tapeCfg, data.tapeCfg);
+    if (data.lofiCfg)     Object.assign(lofiCfg, data.lofiCfg);
     if (data.lpfCfg)      Object.assign(lpfCfg,  data.lpfCfg);
     if (data.hpfCfg)      Object.assign(hpfCfg,  data.hpfCfg);
     if (data.decks) {
@@ -6560,14 +6874,17 @@
       if (!file) return;
       const reader = new FileReader();
       reader.onload = () => {
-        try { loadProject(JSON.parse(reader.result)); }
-        catch (e) { alert('Failed to load: ' + e.message); }
+        try {
+          loadProject(JSON.parse(reader.result));
+          currentProjectName = file.name;
+          updateProjectNameDisplay();
+        } catch (e) { alert('Failed to load: ' + e.message); }
       };
       reader.readAsText(file);
     });
     input.click();
   }
-  document.getElementById('save').addEventListener('click', saveProject);
+  document.getElementById('save').addEventListener('click', (e) => saveProject(e.shiftKey));
   document.getElementById('load').addEventListener('click', openLoadDialog);
 
   // ---------- recording ----------
@@ -6638,7 +6955,7 @@
     });
   }
   function applyCollapsibles() {
-    ['master','comp','ducker','delay','reverb','chorus','flanger','bitcrush','tape','lpfilter','hpfilter'].forEach(id => {
+    ['master','comp','ducker','delay','reverb','chorus','flanger','bitcrush','tape','lofi','lpfilter','hpfilter'].forEach(id => {
       const m = document.getElementById(id);
       if (m) makeCollapsible(m);
     });
@@ -6699,7 +7016,7 @@
   rebuildTracksUI();
   buildMaster(); buildComp(); buildDucker();
   buildDelay(); buildReverb();
-  buildChorus(); buildFlanger(); buildBitcrush(); buildTape();
+  buildChorus(); buildFlanger(); buildBitcrush(); buildTape(); buildLoFi();
   buildLPFilter(); buildHPFilter();
 
   // default: mixer starts collapsed
