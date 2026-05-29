@@ -74,8 +74,15 @@
 
   .layout {
     display: grid;
-    grid-template-columns: 1fr 230px;
+    grid-template-columns: 1fr;
     gap: 24px;
+  }
+  /* Side effects panel only shows on the Effects tab */
+  .side { display: none; }
+  body.mode-effects .side {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 18px;
   }
 
   .transport {
@@ -194,17 +201,10 @@
   }
   .add-row button.small:hover { border-color: var(--text); }
 
-  /* effects mode: hide tracks UI, reflow effect modules into a grid */
+  /* Effects mode hides the tracks UI; .side reveals itself via the rule above. */
   body.mode-effects .add-row,
   body.mode-effects #tracks,
   body.mode-effects .mixer { display: none !important; }
-  body.mode-effects .layout { grid-template-columns: 1fr; }
-  body.mode-effects .side {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-    gap: 18px;
-    flex-direction: row;
-  }
   body.mode-effects { padding-bottom: 24px !important; }
 
   /* mixing mode: hide everything except name + toggles */
@@ -720,12 +720,7 @@
   /* ---- responsive ---- */
   @media (max-width: 1024px) {
     body { padding: 14px 14px 220px; }
-    .layout { grid-template-columns: 1fr; gap: 18px; }
-    .side {
-      flex-direction: row;
-      flex-wrap: wrap;
-    }
-    .side .module { flex: 1 1 240px; min-width: 220px; }
+    .layout { gap: 18px; }
   }
   @media (max-width: 720px) {
     body { padding: 12px 10px 220px; }
