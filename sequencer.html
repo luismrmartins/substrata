@@ -213,18 +213,75 @@
   body.mode-mixing .mic-control,
   body.mode-mixing .mixer,
   body.mode-mixing .add-row { display: none !important; }
+  /* Mix mode — vertical channel strips */
+  body.mode-mixing #tracks {
+    display: flex;
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 10px;
+    align-items: flex-start;
+  }
   body.mode-mixing .track {
-    grid-template-columns: 1fr;
-    padding: 6px 0;
+    display: flex !important;
+    flex-direction: column;
+    align-items: center;
+    width: 96px;
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    padding: 8px 6px;
+    grid-template-columns: unset;
+    overflow: hidden;
   }
   body.mode-mixing .track-meta {
     display: flex;
-    flex-direction: row;
+    flex-direction: column;
     align-items: center;
-    gap: 12px;
+    gap: 6px;
     overflow: visible;
+    width: 100%;
   }
-  body.mode-mixing .toggles { flex-wrap: nowrap; }
+  body.mode-mixing .track-name {
+    font-size: 9px;
+    text-align: center;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 100%;
+    cursor: default;
+  }
+  body.mode-mixing .track-name input.name-input { width: 78px; text-align: center; font-size: 9px; }
+  body.mode-mixing .toggles {
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 3px;
+    max-width: 86px;
+  }
+  body.mode-mixing .toggle { width: 18px; height: 18px; font-size: 9px; }
+  body.mode-mixing .mix-fader-wrap {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    margin-top: 6px;
+  }
+
+  /* The fader strip itself — vertical orientation across modern browsers */
+  .mix-fader-wrap { display: none; }
+  .mix-fader {
+    -webkit-appearance: slider-vertical;
+    appearance: slider-vertical;
+    writing-mode: vertical-lr;
+    direction: rtl;
+    width: 22px;
+    height: 180px;
+    accent-color: var(--accent);
+    cursor: ns-resize;
+  }
+  .mix-vol-val {
+    font-size: 8px;
+    color: var(--muted);
+    font-variant-numeric: tabular-nums;
+  }
 
   .track-name input.name-input {
     background: transparent;
@@ -407,7 +464,16 @@
     color: var(--muted);
     text-transform: uppercase;
     letter-spacing: 0.8px;
+    cursor: pointer;
+    user-select: none;
   }
+  .group .label::before {
+    content: '▸ ';
+    font-size: 8px;
+    opacity: 0.65;
+  }
+  .group:not(.collapsed) .label::before { content: '▾ '; }
+  .group.collapsed .group-row { display: none; }
   .group-row {
     display: flex;
     align-items: center;
@@ -2540,7 +2606,12 @@
   }
   function group(label, ...nodes) {
     const g = el('div', 'group');
-    if (label) g.appendChild(el('span', 'label', label));
+    if (label) {
+      const lbl = el('span', 'label', label);
+      lbl.addEventListener('click', () => g.classList.toggle('collapsed'));
+      g.appendChild(lbl);
+      g.classList.add('collapsed'); // start collapsed
+    }
     const row = el('div', 'group-row');
     nodes.forEach(n => row.appendChild(n));
     g.appendChild(row);
@@ -3261,6 +3332,72 @@
         lfoRate: 4, lfoShape: 'sine',
         lfoCut: 0, lfoRes: 0, lfoPit: 0, lfoAmp: 0, lfoPan: 0,
       },
+      'Sine Lead': {
+        root: 60,
+        waveA: 'sine', octA: 0, tuneA: 0, pwA: 0.5,
+        waveB: 'sine', octB: 12, tuneB: 0, detuneB: 0, pwB: 0.5,
+        mix: 0.35, noise: 0,
+        cutoff: 5000, reso: 0.5, fEnvAmt: 0.1,
+        fAttack: 0.05, fDecay: 0.3, fSustain: 0.8, fRelease: 0.3,
+        attack: 0.05, decay: 0.2, sustain: 0.9, release: 0.4,
+        lfoRate: 5, lfoShape: 'sine',
+        lfoCut: 0, lfoRes: 0, lfoPit: 0.04, lfoAmp: 0, lfoPan: 0,
+      },
+      'Ambient Lead': {
+        root: 60,
+        waveA: 'sawtooth', octA: 0, tuneA: 0, pwA: 0.5,
+        waveB: 'triangle', octB: 0, tuneB: 0, detuneB: 8, pwB: 0.5,
+        mix: 0.4, noise: 0.04,
+        cutoff: 1800, reso: 1, fEnvAmt: 0.2,
+        fAttack: 1.0, fDecay: 0.6, fSustain: 0.6, fRelease: 1.5,
+        attack: 1.2, decay: 0.5, sustain: 0.85, release: 2.0,
+        lfoRate: 0.5, lfoShape: 'sine',
+        lfoCut: 0, lfoRes: 0, lfoPit: 0.06, lfoAmp: 0, lfoPan: 0,
+      },
+      'Vox Lead': {
+        root: 60,
+        waveA: 'sawtooth', octA: 0, tuneA: 0, pwA: 0.5,
+        waveB: 'triangle', octB: 0, tuneB: 0, detuneB: 5, pwB: 0.5,
+        mix: 0.4, noise: 0.04,
+        cutoff: 1500, reso: 4, fEnvAmt: 0.45,
+        fAttack: 0.05, fDecay: 0.3, fSustain: 0.7, fRelease: 0.4,
+        attack: 0.05, decay: 0.2, sustain: 0.85, release: 0.5,
+        lfoRate: 5, lfoShape: 'sine',
+        lfoCut: 0, lfoRes: 0, lfoPit: 0.07, lfoAmp: 0, lfoPan: 0,
+      },
+      'Sequenced Lead': {
+        root: 60,
+        waveA: 'sawtooth', octA: 0, tuneA: 0, pwA: 0.5,
+        waveB: 'pulse', octB: 0, tuneB: 0, detuneB: 5, pwB: 0.35,
+        mix: 0.5, noise: 0,
+        cutoff: 1600, reso: 8, fEnvAmt: 0.75,
+        fAttack: 0.001, fDecay: 0.13, fSustain: 0.0, fRelease: 0.12,
+        attack: 0.001, decay: 0.12, sustain: 0.0, release: 0.1,
+        lfoRate: 4, lfoShape: 'sine',
+        lfoCut: 0, lfoRes: 0, lfoPit: 0, lfoAmp: 0, lfoPan: 0,
+      },
+      'Lazer': {
+        root: 60,
+        waveA: 'sawtooth', octA: 0, tuneA: 0, pwA: 0.5,
+        waveB: 'square', octB: 0, tuneB: 0, detuneB: 18, pwB: 0.5,
+        mix: 0.55, noise: 0.05,
+        cutoff: 5500, reso: 4, fEnvAmt: 0.3,
+        fAttack: 0.001, fDecay: 0.4, fSustain: 0.5, fRelease: 0.3,
+        attack: 0.001, decay: 0.4, sustain: 0.6, release: 0.3,
+        lfoRate: 10, lfoShape: 'sine',
+        lfoCut: 0, lfoRes: 0, lfoPit: 0.1, lfoAmp: 0, lfoPan: 0,
+      },
+      'DnB Lead': {
+        root: 60,
+        waveA: 'sawtooth', octA: 0, tuneA: 0, pwA: 0.5,
+        waveB: 'pulse', octB: 0, tuneB: 0, detuneB: 7, pwB: 0.4,
+        mix: 0.5, noise: 0,
+        cutoff: 2000, reso: 6, fEnvAmt: 0.55,
+        fAttack: 0.001, fDecay: 0.15, fSustain: 0.3, fRelease: 0.15,
+        attack: 0.001, decay: 0.15, sustain: 0.4, release: 0.15,
+        lfoRate: 5, lfoShape: 'sine',
+        lfoCut: 0, lfoRes: 0, lfoPit: 0.03, lfoAmp: 0, lfoPan: 0,
+      },
     },
     chord: {
       'Lush Strings': {
@@ -3461,6 +3598,177 @@
         lfoRate: 4, lfoShape: 'sine',
         lfoCut: 0, lfoRes: 0, lfoPit: 0.02, lfoAmp: 0, lfoPan: 0,
       },
+      // ---- Pad collection ----
+      'Pad — Warm':    { scale: 'minor', root: 48, seventh: true, ninth: false, lengthSteps: 16,
+        waveA: 'sawtooth', octA: 0, tuneA: 0, pwA: 0.5,
+        waveB: 'sawtooth', octB: 0, tuneB: 0, detuneB: 12, pwB: 0.5,
+        mix: 0.5, noise: 0,
+        cutoff: 2000, reso: 1, fEnvAmt: 0.15,
+        fAttack: 1.5, fDecay: 0.8, fSustain: 0.7, fRelease: 1.8,
+        attack: 1.8, decay: 0.8, sustain: 0.9, release: 2.5,
+        lfoRate: 0.4, lfoShape: 'sine',
+        lfoCut: 0, lfoRes: 0, lfoPit: 0.04, lfoAmp: 0, lfoPan: 0,
+      },
+      'Pad — Cinematic': { scale: 'minor', root: 36, seventh: true, ninth: true, lengthSteps: 32,
+        waveA: 'sawtooth', octA: 0, tuneA: 0, pwA: 0.5,
+        waveB: 'sawtooth', octB: 0, tuneB: 0, detuneB: 18, pwB: 0.5,
+        mix: 0.55, noise: 0.02,
+        cutoff: 1800, reso: 0.8, fEnvAmt: 0.2,
+        fAttack: 3.0, fDecay: 1.5, fSustain: 0.6, fRelease: 4.0,
+        attack: 3.5, decay: 1.5, sustain: 0.9, release: 5.0,
+        lfoRate: 0.2, lfoShape: 'sine',
+        lfoCut: 0.15, lfoRes: 0, lfoPit: 0.08, lfoAmp: 0, lfoPan: 0.3,
+      },
+      'Pad — Glass':   { scale: 'major', root: 60, seventh: true, ninth: false, lengthSteps: 16,
+        waveA: 'sine', octA: 0, tuneA: 0, pwA: 0.5,
+        waveB: 'triangle', octB: 12, tuneB: 0, detuneB: 5, pwB: 0.5,
+        mix: 0.4, noise: 0,
+        cutoff: 4500, reso: 0.5, fEnvAmt: 0.15,
+        fAttack: 1.2, fDecay: 0.7, fSustain: 0.6, fRelease: 2.0,
+        attack: 1.5, decay: 0.6, sustain: 0.85, release: 2.5,
+        lfoRate: 3, lfoShape: 'sine',
+        lfoCut: 0, lfoRes: 0, lfoPit: 0.04, lfoAmp: 0, lfoPan: 0,
+      },
+      'Pad — Vintage': { scale: 'minor', root: 48, seventh: true, ninth: true, lengthSteps: 16,
+        waveA: 'sawtooth', octA: 0, tuneA: 0, pwA: 0.5,
+        waveB: 'sawtooth', octB: 0, tuneB: 0, detuneB: 8, pwB: 0.5,
+        mix: 0.5, noise: 0.02,
+        cutoff: 1800, reso: 1.5, fEnvAmt: 0.2,
+        fAttack: 0.8, fDecay: 0.8, fSustain: 0.6, fRelease: 1.5,
+        attack: 1.0, decay: 0.6, sustain: 0.85, release: 1.8,
+        lfoRate: 5, lfoShape: 'sine',
+        lfoCut: 0, lfoRes: 0, lfoPit: 0.1, lfoAmp: 0.05, lfoPan: 0,
+      },
+      'Pad — Ethereal': { scale: 'major', root: 60, seventh: true, ninth: true, lengthSteps: 24,
+        waveA: 'triangle', octA: 0, tuneA: 0, pwA: 0.5,
+        waveB: 'sine', octB: 12, tuneB: 0, detuneB: 4, pwB: 0.5,
+        mix: 0.4, noise: 0,
+        cutoff: 3000, reso: 0.5, fEnvAmt: 0.1,
+        fAttack: 2.5, fDecay: 1.0, fSustain: 0.6, fRelease: 3.0,
+        attack: 3.0, decay: 1.0, sustain: 0.9, release: 3.5,
+        lfoRate: 0.5, lfoShape: 'sine',
+        lfoCut: 0, lfoRes: 0, lfoPit: 0.06, lfoAmp: 0, lfoPan: 0.2,
+      },
+      'Pad — Vapor':   { scale: 'major', root: 60, seventh: true, ninth: false, lengthSteps: 16,
+        waveA: 'sawtooth', octA: 0, tuneA: 0, pwA: 0.5,
+        waveB: 'sawtooth', octB: 0, tuneB: 0, detuneB: 14, pwB: 0.5,
+        mix: 0.5, noise: 0,
+        cutoff: 2200, reso: 1, fEnvAmt: 0.25,
+        fAttack: 1.5, fDecay: 1.0, fSustain: 0.65, fRelease: 2.0,
+        attack: 1.8, decay: 0.8, sustain: 0.88, release: 2.5,
+        lfoRate: 2, lfoShape: 'sine',
+        lfoCut: 0, lfoRes: 0, lfoPit: 0.07, lfoAmp: 0, lfoPan: 0.4,
+      },
+      'Pad — Sweep':   { scale: 'minor', root: 48, seventh: true, ninth: false, lengthSteps: 16,
+        waveA: 'sawtooth', octA: 0, tuneA: 0, pwA: 0.5,
+        waveB: 'sawtooth', octB: 0, tuneB: 0, detuneB: 10, pwB: 0.5,
+        mix: 0.5, noise: 0,
+        cutoff: 500, reso: 6, fEnvAmt: 0.85,
+        fAttack: 2.5, fDecay: 1.0, fSustain: 0.7, fRelease: 1.5,
+        attack: 0.5, decay: 0.4, sustain: 0.9, release: 1.5,
+        lfoRate: 4, lfoShape: 'sine',
+        lfoCut: 0, lfoRes: 0, lfoPit: 0, lfoAmp: 0, lfoPan: 0,
+      },
+      'Pad — Ocean':   { scale: 'minor', root: 48, seventh: true, ninth: true, lengthSteps: 24,
+        waveA: 'sawtooth', octA: 0, tuneA: 0, pwA: 0.5,
+        waveB: 'sawtooth', octB: 0, tuneB: 0, detuneB: 16, pwB: 0.5,
+        mix: 0.5, noise: 0.05,
+        cutoff: 1700, reso: 0.6, fEnvAmt: 0.1,
+        fAttack: 2.0, fDecay: 1.0, fSustain: 0.7, fRelease: 2.5,
+        attack: 2.5, decay: 1.0, sustain: 0.9, release: 3.0,
+        lfoRate: 0.3, lfoShape: 'sine',
+        lfoCut: 0.25, lfoRes: 0, lfoPit: 0.06, lfoAmp: 0, lfoPan: 0.5,
+      },
+      'Pad — Crystal': { scale: 'major', root: 60, seventh: true, ninth: false, lengthSteps: 16,
+        waveA: 'sine', octA: 0, tuneA: 0, pwA: 0.5,
+        waveB: 'sine', octB: 12, tuneB: 0, detuneB: 7, pwB: 0.5,
+        mix: 0.45, noise: 0,
+        cutoff: 5500, reso: 1, fEnvAmt: 0.2,
+        fAttack: 1.0, fDecay: 0.8, fSustain: 0.5, fRelease: 1.5,
+        attack: 1.2, decay: 0.8, sustain: 0.8, release: 2.0,
+        lfoRate: 4, lfoShape: 'sine',
+        lfoCut: 0, lfoRes: 0, lfoPit: 0.06, lfoAmp: 0, lfoPan: 0,
+      },
+      'Pad — Velvet':  { scale: 'minor', root: 48, seventh: true, ninth: true, lengthSteps: 16,
+        waveA: 'triangle', octA: 0, tuneA: 0, pwA: 0.5,
+        waveB: 'triangle', octB: 0, tuneB: 0, detuneB: 6, pwB: 0.5,
+        mix: 0.4, noise: 0,
+        cutoff: 1800, reso: 0.6, fEnvAmt: 0.1,
+        fAttack: 1.8, fDecay: 0.8, fSustain: 0.65, fRelease: 2.2,
+        attack: 2.0, decay: 0.8, sustain: 0.9, release: 2.5,
+        lfoRate: 3.5, lfoShape: 'sine',
+        lfoCut: 0, lfoRes: 0, lfoPit: 0.04, lfoAmp: 0, lfoPan: 0,
+      },
+      'Pad — Solar':   { scale: 'major', root: 48, seventh: true, ninth: false, lengthSteps: 16,
+        waveA: 'sawtooth', octA: 0, tuneA: 0, pwA: 0.5,
+        waveB: 'pulse', octB: 0, tuneB: 0, detuneB: 10, pwB: 0.4,
+        mix: 0.5, noise: 0,
+        cutoff: 2800, reso: 1, fEnvAmt: 0.3,
+        fAttack: 1.2, fDecay: 0.8, fSustain: 0.7, fRelease: 1.5,
+        attack: 1.5, decay: 0.6, sustain: 0.88, release: 2.0,
+        lfoRate: 3, lfoShape: 'sine',
+        lfoCut: 0, lfoRes: 0, lfoPit: 0.04, lfoAmp: 0, lfoPan: 0,
+      },
+      'Pad — Long Drone': { scale: 'minor', root: 36, seventh: false, ninth: false, lengthSteps: 32,
+        waveA: 'sawtooth', octA: 0, tuneA: 0, pwA: 0.5,
+        waveB: 'sawtooth', octB: 0, tuneB: 0, detuneB: 20, pwB: 0.5,
+        mix: 0.55, noise: 0.04,
+        cutoff: 1400, reso: 0.7, fEnvAmt: 0.1,
+        fAttack: 4.0, fDecay: 1.5, fSustain: 0.75, fRelease: 4.5,
+        attack: 4.0, decay: 1.5, sustain: 0.95, release: 5.0,
+        lfoRate: 0.2, lfoShape: 'sine',
+        lfoCut: 0.2, lfoRes: 0, lfoPit: 0.08, lfoAmp: 0, lfoPan: 0.4,
+      },
+      'Pad — Synth Wash': { scale: 'minor', root: 48, seventh: true, ninth: true, lengthSteps: 24,
+        waveA: 'pulse', octA: 0, tuneA: 0, pwA: 0.45,
+        waveB: 'pulse', octB: 0, tuneB: 0, detuneB: 10, pwB: 0.55,
+        mix: 0.5, noise: 0,
+        cutoff: 2400, reso: 1, fEnvAmt: 0.2,
+        fAttack: 2.0, fDecay: 1.0, fSustain: 0.65, fRelease: 2.5,
+        attack: 2.5, decay: 1.0, sustain: 0.88, release: 3.0,
+        lfoRate: 0.4, lfoShape: 'sine',
+        lfoCut: 0, lfoRes: 0, lfoPit: 0.05, lfoAmp: 0, lfoPan: 0.3,
+      },
+      'Pad — Vox':     { scale: 'minor', root: 60, seventh: false, ninth: false, lengthSteps: 16,
+        waveA: 'sawtooth', octA: 0, tuneA: 0, pwA: 0.5,
+        waveB: 'triangle', octB: 0, tuneB: 0, detuneB: 6, pwB: 0.5,
+        mix: 0.4, noise: 0.03,
+        cutoff: 1500, reso: 4, fEnvAmt: 0.4,
+        fAttack: 1.0, fDecay: 0.6, fSustain: 0.65, fRelease: 1.5,
+        attack: 1.2, decay: 0.5, sustain: 0.85, release: 1.8,
+        lfoRate: 4, lfoShape: 'sine',
+        lfoCut: 0, lfoRes: 0, lfoPit: 0.07, lfoAmp: 0, lfoPan: 0,
+      },
+      'Pad — Bright':  { scale: 'major', root: 48, seventh: true, ninth: false, lengthSteps: 12,
+        waveA: 'sawtooth', octA: 0, tuneA: 0, pwA: 0.5,
+        waveB: 'sawtooth', octB: 0, tuneB: 0, detuneB: 8, pwB: 0.5,
+        mix: 0.5, noise: 0,
+        cutoff: 3500, reso: 1, fEnvAmt: 0.25,
+        fAttack: 1.0, fDecay: 0.6, fSustain: 0.7, fRelease: 1.5,
+        attack: 1.2, decay: 0.5, sustain: 0.9, release: 1.5,
+        lfoRate: 4, lfoShape: 'sine',
+        lfoCut: 0, lfoRes: 0, lfoPit: 0.03, lfoAmp: 0, lfoPan: 0,
+      },
+      'Pad — Mellow':  { scale: 'minor', root: 48, seventh: true, ninth: false, lengthSteps: 16,
+        waveA: 'triangle', octA: 0, tuneA: 0, pwA: 0.5,
+        waveB: 'sawtooth', octB: 0, tuneB: 0, detuneB: 6, pwB: 0.5,
+        mix: 0.4, noise: 0,
+        cutoff: 1200, reso: 0.5, fEnvAmt: 0.1,
+        fAttack: 2.0, fDecay: 1.0, fSustain: 0.6, fRelease: 2.0,
+        attack: 2.0, decay: 0.8, sustain: 0.85, release: 2.5,
+        lfoRate: 3, lfoShape: 'sine',
+        lfoCut: 0, lfoRes: 0, lfoPit: 0.03, lfoAmp: 0, lfoPan: 0,
+      },
+      'Pad — Dub Floating': { scale: 'minor', root: 48, seventh: true, ninth: false, lengthSteps: 24,
+        waveA: 'sawtooth', octA: 0, tuneA: 0, pwA: 0.5,
+        waveB: 'sawtooth', octB: -12, tuneB: 0, detuneB: 10, pwB: 0.5,
+        mix: 0.5, noise: 0,
+        cutoff: 1100, reso: 2, fEnvAmt: 0.3,
+        fAttack: 1.5, fDecay: 1.0, fSustain: 0.6, fRelease: 2.5,
+        attack: 1.5, decay: 0.8, sustain: 0.85, release: 3.0,
+        lfoRate: 0.5, lfoShape: 'sine',
+        lfoCut: 0.1, lfoRes: 0, lfoPit: 0.05, lfoAmp: 0, lfoPan: 0.4,
+      },
     },
     mellotron: {
       'Strings':       { root: 60, voicing: 'single', lengthSteps: 16,
@@ -3623,6 +3931,56 @@
         lfoRate: 2, lfoShape: 'sine',
         lfoCut: 0, lfoRes: 0, lfoPit: 0.12, lfoAmp: 0, lfoPan: 0.3,
       },
+      'Cathedral Choir': { root: 60, voicing: 'maj7', lengthSteps: 32,
+        waveA: 'triangle', octA: 0, tuneA: 0, pwA: 0.5,
+        waveB: 'sine', octB: 0, tuneB: 0, detuneB: 8, pwB: 0.5,
+        mix: 0.4, noise: 0.03,
+        cutoff: 1700, reso: 0.7, fEnvAmt: 0.15,
+        fAttack: 3.0, fDecay: 1.0, fSustain: 0.7, fRelease: 3.5,
+        attack: 3.5, decay: 1.0, sustain: 0.9, release: 4.0,
+        lfoRate: 0.8, lfoShape: 'sine',
+        lfoCut: 0, lfoRes: 0, lfoPit: 0.06, lfoAmp: 0, lfoPan: 0.4,
+      },
+      'Wind Pad':       { root: 60, voicing: 'fifth', lengthSteps: 24,
+        waveA: 'sawtooth', octA: 0, tuneA: 0, pwA: 0.5,
+        waveB: 'triangle', octB: 0, tuneB: 0, detuneB: 10, pwB: 0.5,
+        mix: 0.5, noise: 0.1,
+        cutoff: 1400, reso: 1, fEnvAmt: 0.1,
+        fAttack: 1.5, fDecay: 1.0, fSustain: 0.65, fRelease: 2.5,
+        attack: 2.0, decay: 1.0, sustain: 0.85, release: 3.0,
+        lfoRate: 0.3, lfoShape: 'sine',
+        lfoCut: 0.15, lfoRes: 0, lfoPit: 0.07, lfoAmp: 0, lfoPan: 0.5,
+      },
+      'Sax Pad':        { root: 60, voicing: 'single', lengthSteps: 8,
+        waveA: 'sawtooth', octA: 0, tuneA: 0, pwA: 0.5,
+        waveB: 'triangle', octB: 0, tuneB: 0, detuneB: 4, pwB: 0.5,
+        mix: 0.4, noise: 0.03,
+        cutoff: 1800, reso: 2, fEnvAmt: 0.3,
+        fAttack: 0.2, fDecay: 0.4, fSustain: 0.7, fRelease: 0.6,
+        attack: 0.15, decay: 0.3, sustain: 0.85, release: 0.7,
+        lfoRate: 5, lfoShape: 'sine',
+        lfoCut: 0, lfoRes: 0, lfoPit: 0.05, lfoAmp: 0, lfoPan: 0,
+      },
+      'Vintage Cellos': { root: 48, voicing: 'triad-min', lengthSteps: 16,
+        waveA: 'sawtooth', octA: 0, tuneA: 0, pwA: 0.5,
+        waveB: 'sawtooth', octB: -12, tuneB: 0, detuneB: 12, pwB: 0.5,
+        mix: 0.5, noise: 0.02,
+        cutoff: 1500, reso: 1.5, fEnvAmt: 0.15,
+        fAttack: 0.7, fDecay: 0.6, fSustain: 0.65, fRelease: 1.3,
+        attack: 0.9, decay: 0.5, sustain: 0.85, release: 1.5,
+        lfoRate: 4, lfoShape: 'sine',
+        lfoCut: 0, lfoRes: 0, lfoPit: 0.05, lfoAmp: 0, lfoPan: 0,
+      },
+      'Lush Brass':     { root: 60, voicing: 'triad-maj', lengthSteps: 12,
+        waveA: 'sawtooth', octA: 0, tuneA: 0, pwA: 0.5,
+        waveB: 'pulse', octB: 0, tuneB: 0, detuneB: 6, pwB: 0.35,
+        mix: 0.5, noise: 0,
+        cutoff: 2200, reso: 2, fEnvAmt: 0.45,
+        fAttack: 0.3, fDecay: 0.4, fSustain: 0.6, fRelease: 0.6,
+        attack: 0.2, decay: 0.3, sustain: 0.8, release: 0.8,
+        lfoRate: 4, lfoShape: 'sine',
+        lfoCut: 0, lfoRes: 0, lfoPit: 0.03, lfoAmp: 0, lfoPan: 0,
+      },
     },
     bass: {
       'Acid 303': {
@@ -3753,6 +4111,62 @@
         lfoRate: 8, lfoShape: 'sine',
         lfoCut: 0, lfoRes: 0, lfoPitch: 0.04, lfoAmp: 0, lfoEnv: 0,
       },
+      'Walking Bass': {
+        root: 36, wave: 'sawtooth',
+        subLevel: 0.7, sinLevel: 0.3, sawLevel: 0.3,
+        cutoff: 1200, reso: 2, env: 0.3, fDecay: 0.25,
+        attack: 0.005, decay: 0.25, sustain: 0.5, release: 0.2,
+        lfoRate: 4, lfoShape: 'sine',
+        lfoCut: 0, lfoRes: 0, lfoPitch: 0, lfoAmp: 0, lfoEnv: 0,
+      },
+      'Synth Wave Bass': {
+        root: 36, wave: 'sawtooth',
+        subLevel: 0.6, sinLevel: 0.2, sawLevel: 0.7,
+        cutoff: 1500, reso: 4, env: 0.4, fDecay: 0.2,
+        attack: 0.002, decay: 0.15, sustain: 0.5, release: 0.15,
+        lfoRate: 4, lfoShape: 'sine',
+        lfoCut: 0, lfoRes: 0, lfoPitch: 0.02, lfoAmp: 0, lfoEnv: 0,
+      },
+      'Tunnel Bass': {
+        root: 36, wave: 'sawtooth',
+        subLevel: 0.7, sinLevel: 0.2, sawLevel: 0.6,
+        cutoff: 700, reso: 9, env: 0.5, fDecay: 0.3,
+        attack: 0.005, decay: 0.25, sustain: 0.4, release: 0.2,
+        lfoRate: 2, lfoShape: 'sine',
+        lfoCut: 0.4, lfoRes: 0, lfoPitch: 0, lfoAmp: 0, lfoEnv: 0,
+      },
+      'Distorted Bass': {
+        root: 36, wave: 'square',
+        subLevel: 0.4, sinLevel: 0.1, sawLevel: 0.85,
+        cutoff: 1300, reso: 10, env: 0.6, fDecay: 0.2,
+        attack: 0.001, decay: 0.15, sustain: 0.4, release: 0.1,
+        lfoRate: 4, lfoShape: 'sine',
+        lfoCut: 0, lfoRes: 0, lfoPitch: 0, lfoAmp: 0, lfoEnv: 0,
+      },
+      'Octave Sub': {
+        root: 36, wave: 'sawtooth',
+        subLevel: 1.0, sinLevel: 0.0, sawLevel: 0.5,
+        cutoff: 900, reso: 3, env: 0.3, fDecay: 0.2,
+        attack: 0.005, decay: 0.2, sustain: 0.5, release: 0.15,
+        lfoRate: 4, lfoShape: 'sine',
+        lfoCut: 0, lfoRes: 0, lfoPitch: 0, lfoAmp: 0, lfoEnv: 0,
+      },
+      'Funky Bass': {
+        root: 36, wave: 'sawtooth',
+        subLevel: 0.3, sinLevel: 0.2, sawLevel: 0.75,
+        cutoff: 1600, reso: 6, env: 0.65, fDecay: 0.15,
+        attack: 0.001, decay: 0.12, sustain: 0.1, release: 0.1,
+        lfoRate: 4, lfoShape: 'sine',
+        lfoCut: 0, lfoRes: 0, lfoPitch: 0, lfoAmp: 0, lfoEnv: 0,
+      },
+      'Compressed Bass': {
+        root: 36, wave: 'sawtooth',
+        subLevel: 0.55, sinLevel: 0.25, sawLevel: 0.55,
+        cutoff: 1100, reso: 3, env: 0.4, fDecay: 0.2,
+        attack: 0.001, decay: 0.18, sustain: 0.5, release: 0.15,
+        lfoRate: 4, lfoShape: 'sine',
+        lfoCut: 0, lfoRes: 0, lfoPitch: 0, lfoAmp: 0, lfoEnv: 0,
+      },
     },
     drum: {
       'Boomy 808 Kick':   { voiceType: '808 Kick',   tune: -3 },
@@ -3780,6 +4194,24 @@
       'High Tom':         { voiceType: 'tom-hi',     tune: 2 },
       'Rim Click':        { voiceType: 'clave',      tune: 0 },
       'High Cowbell':     { voiceType: '808 Cowbell',tune: 7 },
+      // ---- extra drum patches ----
+      'Sub 808 Kick':     { voiceType: '808 Kick',   tune: -5 },
+      'Distorted 909 Kick':{ voiceType: '909 Kick',  tune: 4 },
+      'Tuned Linn Kick':  { voiceType: 'Linn Kick',  tune: 3 },
+      'CR-78 Vintage Kick':{ voiceType: 'CR78 Kick', tune: 0 },
+      'DR Kick Low':      { voiceType: 'DR Kick',    tune: -3 },
+      'Tight 909 Snare':  { voiceType: '909 Snare',  tune: 5 },
+      'Soft CR-78 Snare': { voiceType: 'CR78 Snare', tune: 0 },
+      'DR Snare':         { voiceType: 'DR Snare',   tune: 0 },
+      'Hi 808 Clap':      { voiceType: '808 Clap',   tune: 3 },
+      'Mid 808 Clap':     { voiceType: '808 Clap',   tune: -2 },
+      'Vintage Crash':    { voiceType: 'crash',      tune: -3 },
+      'Bright Ride':      { voiceType: 'ride',       tune: 3 },
+      'Soft Ride':        { voiceType: 'ride',       tune: -3 },
+      'Tom Roll Low':     { voiceType: 'tom-low',    tune: -5 },
+      'Tom Roll High':    { voiceType: 'tom-hi',     tune: 5 },
+      'Clave High':       { voiceType: 'clave',      tune: 5 },
+      'Clave Low':        { voiceType: 'clave',      tune: -5 },
     },
   };
   function loadPresetStore() {
@@ -3953,6 +4385,25 @@
     track.knobsEl = knobs;
     buildKnobs(track);
     wrap.appendChild(knobs);
+
+    // Vertical fader for mix-mode channel strip (hidden in other modes)
+    const mixFaderWrap = el('div', 'mix-fader-wrap');
+    const mixFader = el('input', 'mix-fader');
+    mixFader.type = 'range';
+    mixFader.min = 0; mixFader.max = 1.2; mixFader.step = 0.01;
+    mixFader.value = track.volume;
+    const mixVolLabel = el('span', 'mix-vol-val', Number(track.volume).toFixed(2));
+    mixFader.addEventListener('input', () => {
+      const v = parseFloat(mixFader.value);
+      track.volume = v;
+      mixVolLabel.textContent = v.toFixed(2);
+      if (track.volNode) track.volNode.gain.setTargetAtTime(v, audioCtx.currentTime, 0.01);
+    });
+    mixFaderWrap.appendChild(mixFader);
+    mixFaderWrap.appendChild(mixVolLabel);
+    track._mixFader = mixFader;
+    track._mixVolLabel = mixVolLabel;
+    wrap.appendChild(mixFaderWrap);
 
     tracksEl.appendChild(wrap);
     if (track.kind !== 'mic') rebuildSteps(track);
