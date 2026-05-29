@@ -724,28 +724,55 @@
   }
 
   // ---- mode 3: fabric stripes ----
-  // Overlapping rectangular "blocks" of vertical white stripes painted on a
-  // black field. A shared 2D warp field bends every stripe as if the whole
-  // surface were a folded sheet of cloth. Bass + kicks drive fold depth,
-  // per-band energy drives each block's stripe density.
+  // ~20 overlapping rectangular blocks of vertical white stripes at strongly
+  // varied scales. A 5-component warp field — vertical sines + two diagonal
+  // creases + high-frequency detail — bends every stripe like a folded sheet
+  // of cloth. Stripes near sharp folds dim down (fabric facing away from the
+  // light); flat areas read bright. Audio drives fold depth, per-band energy
+  // drives per-block density, and kicks add a global "snap".
   const CLOTH_BLOCKS = [
-    { x: 0.00, w: 0.42, y: 0.00, h: 0.36, baseDen: 26, band: 'sub'    },
-    { x: 0.30, w: 0.70, y: 0.05, h: 0.30, baseDen: 42, band: 'bass'   },
-    { x: 0.00, w: 0.58, y: 0.28, h: 0.30, baseDen: 30, band: 'lowMid' },
-    { x: 0.46, w: 0.54, y: 0.34, h: 0.28, baseDen: 50, band: 'mid'    },
-    { x: 0.06, w: 0.54, y: 0.56, h: 0.30, baseDen: 34, band: 'high'   },
-    { x: 0.50, w: 0.50, y: 0.62, h: 0.38, baseDen: 58, band: 'air'    },
-    { x: 0.20, w: 0.40, y: 0.74, h: 0.26, baseDen: 28, band: 'bass'   }
+    // top row — diverse scales side by side
+    { x: 0.00, w: 0.15, y: 0.00, h: 0.20, baseDen: 16, band: 'sub'    },
+    { x: 0.13, w: 0.20, y: 0.02, h: 0.34, baseDen: 38, band: 'bass'   },
+    { x: 0.31, w: 0.10, y: 0.00, h: 0.16, baseDen: 28, band: 'lowMid' },
+    { x: 0.38, w: 0.28, y: 0.04, h: 0.42, baseDen: 55, band: 'mid'    },
+    { x: 0.64, w: 0.18, y: 0.00, h: 0.26, baseDen: 32, band: 'high'   },
+    { x: 0.80, w: 0.20, y: 0.02, h: 0.38, baseDen: 62, band: 'air'    },
+    // upper-mid — denser packing
+    { x: 0.00, w: 0.22, y: 0.20, h: 0.28, baseDen: 44, band: 'bass'   },
+    { x: 0.18, w: 0.16, y: 0.34, h: 0.22, baseDen: 26, band: 'sub'    },
+    { x: 0.30, w: 0.16, y: 0.44, h: 0.18, baseDen: 20, band: 'lowMid' },
+    { x: 0.46, w: 0.22, y: 0.38, h: 0.28, baseDen: 60, band: 'mid'    },
+    { x: 0.66, w: 0.16, y: 0.30, h: 0.30, baseDen: 22, band: 'high'   },
+    { x: 0.82, w: 0.18, y: 0.40, h: 0.28, baseDen: 50, band: 'air'    },
+    // lower-mid bridges
+    { x: 0.04, w: 0.20, y: 0.46, h: 0.22, baseDen: 33, band: 'mid'    },
+    { x: 0.22, w: 0.18, y: 0.56, h: 0.20, baseDen: 42, band: 'bass'   },
+    { x: 0.40, w: 0.10, y: 0.62, h: 0.20, baseDen: 14, band: 'sub'    },
+    // bottom row
+    { x: 0.00, w: 0.28, y: 0.66, h: 0.34, baseDen: 27, band: 'sub'    },
+    { x: 0.26, w: 0.22, y: 0.74, h: 0.26, baseDen: 50, band: 'lowMid' },
+    { x: 0.46, w: 0.18, y: 0.66, h: 0.34, baseDen: 65, band: 'mid'    },
+    { x: 0.62, w: 0.22, y: 0.72, h: 0.28, baseDen: 30, band: 'high'   },
+    { x: 0.82, w: 0.18, y: 0.66, h: 0.34, baseDen: 20, band: 'air'    }
   ];
 
   function clothWarp(x, y, W, H, p, amp) {
     const xN = x / W;
     const yN = y / H;
-    // Three layered sines at different frequencies = soft fabric folds
-    const w1 = Math.sin(yN * Math.PI * 1.6 + p * 0.35) * amp;
-    const w2 = Math.sin(yN * Math.PI * 3.4 + xN * Math.PI * 0.9 + p * 0.55) * amp * 0.45;
-    const w3 = Math.cos(xN * Math.PI * 2.3 + yN * Math.PI * 0.7 - p * 0.25) * amp * 0.30;
-    return w1 + w2 + w3;
+    // Long vertical fold
+    const w1 = Math.sin(yN * Math.PI * 1.6 + p * 0.45) * amp;
+    // Medium vertical ripple
+    const w2 = Math.sin(yN * Math.PI * 3.3 + xN * Math.PI * 0.9 + p * 0.6) * amp * 0.5;
+    // Diagonal crease — upper-left to lower-right
+    const d1 = xN * 0.7 + yN;
+    const w3 = Math.sin(d1 * Math.PI * 1.9 + p * 0.35) * amp * 0.55;
+    // Diagonal crease — opposite
+    const d2 = xN * 0.9 - yN * 1.1;
+    const w4 = Math.sin(d2 * Math.PI * 2.6 + p * 0.55) * amp * 0.42;
+    // High-frequency texture
+    const w5 = Math.sin(yN * Math.PI * 9 + xN * Math.PI * 4.5 + p * 0.8) * amp * 0.18;
+    return w1 + w2 + w3 + w4 + w5;
   }
 
   function renderCloth(W, H, dpr) {
@@ -758,59 +785,87 @@
       air:    airAvg
     };
 
-    // Fold depth grows with sustained bass + kick punch
-    const warpAmp = (12 + bassAvg * 55 + kickHit * 35 + midAvg * 18) * dpr;
+    // Fold depth grows with sustained bass + kick punch + mid presence
+    const warpAmp = (16 + bassAvg * 75 + kickHit * 45 + midAvg * 22 + lowMidAvg * 18) * dpr;
+    // Local phase moves faster on louder material so the cloth feels alive
+    const totalEnergy = (subAvg + bassAvg + lowMidAvg + midAvg + highAvg + airAvg) / 6;
+    const localPhase = phase * (1 + totalEnergy * 1.5);
 
-    ctx.fillStyle = '#FFFFFF';
     ctx.strokeStyle = '#FFFFFF';
+    ctx.lineCap = 'butt';
 
     for (let bi = 0; bi < CLOTH_BLOCKS.length; bi++) {
       const b = CLOTH_BLOCKS[bi];
       const energy = bandEnergy[b.band] || 0;
-      // Block dimensions in pixels — a touch of per-band sway on x position
-      const sway = Math.sin(phase * 0.4 + bi * 0.9) * (4 + energy * 14) * dpr;
-      const x0 = b.x * W + sway;
-      const y0 = b.y * H;
+      // Per-block sway — different blocks drift differently so the field
+      // never reads as a single uniform surface
+      const swayX = Math.sin(localPhase * 0.5 + bi * 1.1) * (3 + energy * 16) * dpr;
+      const swayY = Math.cos(localPhase * 0.35 + bi * 0.7) * (2 + energy * 6) * dpr;
+      const x0 = b.x * W + swayX;
+      const y0 = b.y * H + swayY;
       const bw = b.w * W;
       const bh = b.h * H;
 
-      // Stripe density: baseline + audio
-      const density = Math.max(10, Math.floor(b.baseDen * (0.9 + energy * 1.3)));
+      const density = Math.max(10, Math.floor(b.baseDen * (0.9 + energy * 1.4)));
       const spacing = bw / density;
-      // Stripe width: thinner when dense, thicker when sparse, modulated by audio
-      const stripeW = Math.max(0.8, spacing * (0.20 + energy * 0.30));
+      const baseStripeW = Math.max(0.7, spacing * (0.18 + energy * 0.32));
 
-      // Clip drawing to this block so stripes don't bleed across the field —
-      // that boxy "different swatch" look from the reference image.
       ctx.save();
       ctx.beginPath();
       ctx.rect(x0, y0, bw, bh);
       ctx.clip();
 
-      const segs = 28;
+      // Per-block phase offset so each block has slightly different fold
+      // timing — keeps the field reading as multiple swatches, not one sheet
+      const blockPhase = localPhase + bi * 0.6;
+      const segs = 26;
+
       for (let i = 0; i < density; i++) {
         const xCol = x0 + i * spacing + spacing * 0.5;
+
+        // ---- per-stripe lighting: dim where fabric folds away from viewer ----
+        // Sample warp at top / mid / bottom — large second-derivative means
+        // the fabric is curving sharply (perpendicular to view → dim).
+        const wTop = clothWarp(xCol, y0,              W, H, blockPhase, warpAmp);
+        const wMid = clothWarp(xCol, y0 + bh * 0.5,   W, H, blockPhase, warpAmp);
+        const wBot = clothWarp(xCol, y0 + bh,         W, H, blockPhase, warpAmp);
+        const curvature = Math.abs(wTop + wBot - 2 * wMid);
+        const flatness = 1 - Math.min(1, curvature / (38 * dpr));
+        // Horizontal compression — derivative of warp w.r.t. neighbour stripe
+        const wNext = clothWarp(xCol + spacing, y0 + bh * 0.5, W, H, blockPhase, warpAmp);
+        const compression = Math.abs(wNext - wMid);
+        const compressFactor = 1 / (1 + compression * 0.04);
+        const opacity = 0.35 + 0.65 * flatness;
+        // Thicker stripes where fabric expands toward viewer, thinner where it compresses
+        const stripeW = baseStripeW * (0.6 + compressFactor * 0.8);
+
+        ctx.strokeStyle = 'rgba(255,255,255,' + opacity.toFixed(3) + ')';
+        ctx.lineWidth = stripeW;
 
         ctx.beginPath();
         for (let s = 0; s <= segs; s++) {
           const t = s / segs;
           const y = y0 + t * bh;
-          const dx = clothWarp(xCol, y, W, H, phase + bi * 0.4, warpAmp);
+          const dx = clothWarp(xCol, y, W, H, blockPhase, warpAmp);
           if (s === 0) ctx.moveTo(xCol + dx, y);
           else ctx.lineTo(xCol + dx, y);
         }
-        ctx.lineWidth = stripeW;
-        ctx.lineCap = 'butt';
         ctx.stroke();
       }
 
       ctx.restore();
     }
 
-    // Subtle vignette so the edges fall off gently
-    const vig = ctx.createRadialGradient(W * 0.5, H * 0.5, Math.min(W, H) * 0.4, W * 0.5, H * 0.5, Math.max(W, H) * 0.7);
+    // ---- global kick punch: brief bright flash across whole cloth ----
+    if (kickHit > 0.05) {
+      ctx.fillStyle = 'rgba(255, 255, 255, ' + (kickHit * 0.06).toFixed(3) + ')';
+      ctx.fillRect(0, 0, W, H);
+    }
+
+    // Vignette to soften edges and add photographic depth
+    const vig = ctx.createRadialGradient(W * 0.5, H * 0.5, Math.min(W, H) * 0.35, W * 0.5, H * 0.5, Math.max(W, H) * 0.75);
     vig.addColorStop(0, 'rgba(0, 0, 0, 0)');
-    vig.addColorStop(1, 'rgba(0, 0, 0, 0.55)');
+    vig.addColorStop(1, 'rgba(0, 0, 0, 0.6)');
     ctx.fillStyle = vig;
     ctx.fillRect(0, 0, W, H);
   }
