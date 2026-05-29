@@ -133,6 +133,29 @@
   body.immersive .status { display: none !important; }
   :fullscreen, body.immersive { cursor: none; }
 
+  /* Mode 2 — chromatic arc on black background. Invert text colours so the
+     remaining chrome stays legible outside of fullscreen. */
+  body.mode-2 { background: #000; color: #ECE8E3; }
+  body.mode-2 .title, body.mode-2 .vertical, body.mode-2 .status, body.mode-2 .back-link { color: #888; }
+  body.mode-2 .title .accent { color: #ECE8E3; }
+  body.mode-2 .back-link:hover { color: #ECE8E3; }
+  body.mode-2 .controls { background: rgba(0, 0, 0, 0.75); border-color: #333; }
+  body.mode-2 button { border-color: #555; color: #ECE8E3; }
+  body.mode-2 button:hover { border-color: #ECE8E3; }
+  body.mode-2 button.on { background: #ECE8E3; color: #000; border-color: #ECE8E3; }
+  .mode-hint {
+    position: fixed;
+    bottom: 24px;
+    right: 28px;
+    z-index: 10;
+    font-size: 10px;
+    color: var(--muted);
+    letter-spacing: 1px;
+    user-select: none;
+  }
+  body.mode-2 .mode-hint { color: #888; }
+  :fullscreen .mode-hint, body.immersive .mode-hint { display: none !important; }
+
   @media (max-width: 560px) {
     .title { font-size: 9px; top: 14px; left: 16px; letter-spacing: 1.5px; }
     .vertical { font-size: 9px; top: 14px; right: 16px; }
@@ -152,8 +175,11 @@
 <div class="controls">
   <button id="start-tab" title="Listen to another browser tab (recommended)">🖥 Tab Audio</button>
   <button id="start-mic" title="Listen to microphone">🎤 Mic</button>
+  <button id="mode-1" title="Pink line spectrum (key 1)">1 · LINES</button>
+  <button id="mode-2" title="Chromatic arc (key 2)">2 · ARC</button>
   <button id="fullscreen" title="Toggle full screen (ESC to exit)">⛶</button>
 </div>
+<div class="mode-hint">1 · LINES &nbsp; 2 · ARC &nbsp; F · FULL</div>
 
 <script>
 (function () {
@@ -163,6 +189,17 @@
   const startTabBtn = document.getElementById('start-tab');
   const startMicBtn = document.getElementById('start-mic');
   const fullscreenBtn = document.getElementById('fullscreen');
+  const mode1Btn = document.getElementById('mode-1');
+  const mode2Btn = document.getElementById('mode-2');
+
+  let mode = 1;  // 1 = pink line spectrum, 2 = chromatic arc
+  function setMode(m) {
+    mode = m;
+    document.body.classList.toggle('mode-1', m === 1);
+    document.body.classList.toggle('mode-2', m === 2);
+    mode1Btn.classList.toggle('on', m === 1);
+    mode2Btn.classList.toggle('on', m === 2);
+  }
 
   let audioCtx = null;
   let analyser = null;
@@ -300,7 +337,12 @@
     if (e.key === 'f' || e.key === 'F') {
       if (isFullscreen()) exitFullscreen(); else enterFullscreen();
     }
+    if (e.key === '1') setMode(1);
+    if (e.key === '2') setMode(2);
   });
+  mode1Btn.addEventListener('click', () => setMode(1));
+  mode2Btn.addEventListener('click', () => setMode(2));
+  setMode(1);
 
   // ----- helpers for onset detection -----
   function bandAvg(arr, startBin, endBin) {
@@ -317,8 +359,8 @@
     const W = canvas.width, H = canvas.height;
     const dpr = Math.max(1, window.devicePixelRatio || 1);
 
-    // Crisp clear (no fade) so the linework stays clean.
-    ctx.fillStyle = '#FDFCF4';
+    // Crisp clear — colour depends on the current mode.
+    ctx.fillStyle = mode === 2 ? '#000000' : '#FDFCF4';
     ctx.fillRect(0, 0, W, H);
 
     if (!analyser) {
@@ -400,6 +442,8 @@
     const norm = totalNow / Math.max(0.05, dynRef);
 
     phase += 0.005 + totalNow * 0.04 + kickHit * 0.05;
+
+    if (mode === 2) { renderArc(W, H, dpr); return; }
 
     // ----- background depth: bottom warmth tied to sustained sub/bass -----
     const lowGrad = ctx.createLinearGradient(0, H * 0.55, 0, H);
@@ -535,6 +579,110 @@
     ctx.globalCompositeOperation = 'source-over';
   }
 
+  // ---- mode 2: chromatic spectrum arc ----
+  // Inspired by light passing through a prism — a partial ring of vertical rays
+  // diffracting through the full spectrum, with the arc breathing on bass and
+  // each ray length driven by its corresponding FFT bin.
+  let arcSweep = 0;
+  function renderArc(W, H, dpr) {
+    const cx = W * 0.5;
+    const cy = H * 0.42;
+    const baseR = Math.min(W, H) * (0.26 + bassAvg * 0.04 + kickHit * 0.025);
+
+    // Subtle starfield grain — very faint random dots
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.015)';
+    for (let i = 0; i < 18; i++) {
+      const sx = Math.random() * W;
+      const sy = Math.random() * H;
+      ctx.fillRect(sx, sy, dpr, dpr);
+    }
+
+    // Outer halo — pulses with sustained energy
+    const haloA = 0.04 + (bassAvg + midAvg) * 0.12;
+    const halo = ctx.createRadialGradient(cx, cy, baseR * 0.6, cx, cy, baseR * 2.2);
+    halo.addColorStop(0, 'rgba(140, 50, 200, ' + haloA.toFixed(3) + ')');
+    halo.addColorStop(1, 'rgba(0, 0, 0, 0)');
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.fillStyle = halo;
+    ctx.fillRect(0, 0, W, H);
+
+    // Arc geometry — opens at the lower-right. Sweep drifts slowly so it
+    // never feels static even when audio is calm.
+    arcSweep += 0.0015 + bassAvg * 0.004;
+    const ARC_START = Math.PI * 0.85 + Math.sin(arcSweep) * 0.05;
+    const ARC_SPAN  = Math.PI * 1.7;
+
+    const numRays = 280;
+    const bins = freqData.length;
+
+    for (let i = 0; i < numRays; i++) {
+      const t = i / numRays;
+      const angle = ARC_START + t * ARC_SPAN;
+
+      // Map ray to an FFT bin — front-load so the bass end of the spectrum
+      // takes up the visually-dominant outer sweep.
+      const binIdx = Math.floor(Math.pow(t, 1.3) * bins * 0.45);
+      const v = freqData[binIdx] / 255;
+
+      // Ray length: per-bin energy + bass-driven base growth + kick punch
+      const energy = v * 0.7 + bassAvg * 0.2 + kickHit * 0.15;
+      const rayLen = baseR * (0.25 + energy * 0.95);
+      const innerR = baseR - rayLen * 0.35;
+      const outerR = baseR + rayLen * 0.85;
+
+      const cosA = Math.cos(angle);
+      const sinA = Math.sin(angle);
+      const x1 = cx + cosA * innerR;
+      const y1 = cy + sinA * innerR;
+      const x2 = cx + cosA * outerR;
+      const y2 = cy + sinA * outerR;
+
+      // Hue cycles through full spectrum along the arc.
+      // A tiny rotation tied to phase keeps the colours alive.
+      const hue = ((t * 360) + phase * 18) % 360;
+
+      // Multi-pass chromatic bloom — three stacked strokes from wide+soft to
+      // thin+bright. This is what gives the prismatic, blooming feel.
+      for (let pass = 0; pass < 3; pass++) {
+        const passWidth = (5 - pass * 1.6) * dpr;
+        const passLight = 50 + pass * 14;
+        const passAlpha = (0.10 + energy * 0.45) * (pass === 0 ? 0.55 : (pass === 1 ? 0.85 : 1.0));
+        ctx.strokeStyle = 'hsla(' + hue.toFixed(1) + ', 100%, ' + passLight + '%, ' + passAlpha.toFixed(3) + ')';
+        ctx.lineWidth = passWidth;
+        ctx.lineCap = 'round';
+        ctx.beginPath();
+        ctx.moveTo(x1, y1);
+        ctx.lineTo(x2, y2);
+        ctx.stroke();
+      }
+    }
+
+    // Kick hit — bright inner ring flash
+    if (kickHit > 0.05) {
+      ctx.strokeStyle = 'rgba(255, 255, 255, ' + (kickHit * 0.35).toFixed(3) + ')';
+      ctx.lineWidth = (1 + kickHit * 2) * dpr;
+      ctx.beginPath();
+      ctx.arc(cx, cy, baseR * 0.55, ARC_START, ARC_START + ARC_SPAN);
+      ctx.stroke();
+    }
+
+    // Hat hit — radial sparkles around the outer edge
+    if (hatHit > 0.1) {
+      const n = Math.floor(8 + hatHit * 14);
+      for (let i = 0; i < n; i++) {
+        const a = ARC_START + Math.random() * ARC_SPAN;
+        const r = baseR * (1.05 + Math.random() * 0.6);
+        const sx = cx + Math.cos(a) * r;
+        const sy = cy + Math.sin(a) * r;
+        const hue = Math.random() * 360;
+        ctx.fillStyle = 'hsla(' + hue.toFixed(0) + ', 90%, 75%, ' + (hatHit * 0.6).toFixed(3) + ')';
+        ctx.fillRect(sx, sy, 2 * dpr, 2 * dpr);
+      }
+    }
+
+    ctx.globalCompositeOperation = 'source-over';
+  }
+
   // ---- event spawners ----
   function spawnRipple(W, H, dpr, strength) {
     // One ripple per kick — centre-ish, expanding outward
@@ -571,6 +719,34 @@
   }
 
   function drawIdleHint(W, H, dpr) {
+    if (mode === 2) {
+      // Mode 2 idle — slow chromatic arc preview
+      const cx = W * 0.5, cy = H * 0.42;
+      const baseR = Math.min(W, H) * 0.26;
+      const t0 = Date.now() * 0.0004;
+      const ARC_START = Math.PI * 0.85;
+      const ARC_SPAN  = Math.PI * 1.7;
+      const numRays = 200;
+      for (let i = 0; i < numRays; i++) {
+        const t = i / numRays;
+        const angle = ARC_START + t * ARC_SPAN;
+        const rayLen = baseR * (0.28 + (Math.sin(t * Math.PI * 4 + t0) * 0.5 + 0.5) * 0.25);
+        const cosA = Math.cos(angle), sinA = Math.sin(angle);
+        const x1 = cx + cosA * (baseR - rayLen * 0.3);
+        const y1 = cy + sinA * (baseR - rayLen * 0.3);
+        const x2 = cx + cosA * (baseR + rayLen * 0.7);
+        const y2 = cy + sinA * (baseR + rayLen * 0.7);
+        const hue = ((t * 360) + t0 * 20) % 360;
+        ctx.strokeStyle = 'hsla(' + hue.toFixed(0) + ', 100%, 60%, 0.18)';
+        ctx.lineWidth = 2 * dpr;
+        ctx.lineCap = 'round';
+        ctx.beginPath();
+        ctx.moveTo(x1, y1);
+        ctx.lineTo(x2, y2);
+        ctx.stroke();
+      }
+      return;
+    }
     const lineSpacing = 3 * dpr;
     const numLines = Math.floor(W / lineSpacing);
     for (let i = 0; i < numLines; i++) {
@@ -590,7 +766,7 @@
     if (running) return;
     const W = canvas.width, H = canvas.height;
     const dpr = Math.max(1, window.devicePixelRatio || 1);
-    ctx.fillStyle = '#FDFCF4';
+    ctx.fillStyle = mode === 2 ? '#000000' : '#FDFCF4';
     ctx.fillRect(0, 0, W, H);
     drawIdleHint(W, H, dpr);
     requestAnimationFrame(idleTick);
