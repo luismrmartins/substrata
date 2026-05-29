@@ -133,16 +133,17 @@
   body.immersive .status { display: none !important; }
   :fullscreen, body.immersive { cursor: none; }
 
-  /* Mode 2 — chromatic arc on black background. Invert text colours so the
-     remaining chrome stays legible outside of fullscreen. */
-  body.mode-2 { background: #000; color: #ECE8E3; }
-  body.mode-2 .title, body.mode-2 .vertical, body.mode-2 .status, body.mode-2 .back-link { color: #888; }
-  body.mode-2 .title .accent { color: #ECE8E3; }
-  body.mode-2 .back-link:hover { color: #ECE8E3; }
-  body.mode-2 .controls { background: rgba(0, 0, 0, 0.75); border-color: #333; }
-  body.mode-2 button { border-color: #555; color: #ECE8E3; }
-  body.mode-2 button:hover { border-color: #ECE8E3; }
-  body.mode-2 button.on { background: #ECE8E3; color: #000; border-color: #ECE8E3; }
+  /* Dark modes (chromatic arc, fabric stripes) — invert chrome colours so
+     it stays legible against the black canvas. */
+  body.mode-2, body.mode-3 { background: #000; color: #ECE8E3; }
+  body.mode-2 .title, body.mode-2 .vertical, body.mode-2 .status, body.mode-2 .back-link,
+  body.mode-3 .title, body.mode-3 .vertical, body.mode-3 .status, body.mode-3 .back-link { color: #888; }
+  body.mode-2 .title .accent, body.mode-3 .title .accent { color: #ECE8E3; }
+  body.mode-2 .back-link:hover, body.mode-3 .back-link:hover { color: #ECE8E3; }
+  body.mode-2 .controls, body.mode-3 .controls { background: rgba(0, 0, 0, 0.75); border-color: #333; }
+  body.mode-2 button, body.mode-3 button { border-color: #555; color: #ECE8E3; }
+  body.mode-2 button:hover, body.mode-3 button:hover { border-color: #ECE8E3; }
+  body.mode-2 button.on, body.mode-3 button.on { background: #ECE8E3; color: #000; border-color: #ECE8E3; }
   .mode-hint {
     position: fixed;
     bottom: 24px;
@@ -153,7 +154,7 @@
     letter-spacing: 1px;
     user-select: none;
   }
-  body.mode-2 .mode-hint { color: #888; }
+  body.mode-2 .mode-hint, body.mode-3 .mode-hint { color: #888; }
   :fullscreen .mode-hint, body.immersive .mode-hint { display: none !important; }
 
   @media (max-width: 560px) {
@@ -177,9 +178,10 @@
   <button id="start-mic" title="Listen to microphone">🎤 Mic</button>
   <button id="mode-1" title="Pink line spectrum (key 1)">1 · LINES</button>
   <button id="mode-2" title="Chromatic arc (key 2)">2 · ARC</button>
+  <button id="mode-3" title="Fabric stripes (key 3)">3 · CLOTH</button>
   <button id="fullscreen" title="Toggle full screen (ESC to exit)">⛶</button>
 </div>
-<div class="mode-hint">1 · LINES &nbsp; 2 · ARC &nbsp; F · FULL</div>
+<div class="mode-hint">1 · LINES &nbsp; 2 · ARC &nbsp; 3 · CLOTH &nbsp; F · FULL</div>
 
 <script>
 (function () {
@@ -191,14 +193,17 @@
   const fullscreenBtn = document.getElementById('fullscreen');
   const mode1Btn = document.getElementById('mode-1');
   const mode2Btn = document.getElementById('mode-2');
+  const mode3Btn = document.getElementById('mode-3');
 
-  let mode = 1;  // 1 = pink line spectrum, 2 = chromatic arc
+  let mode = 1;  // 1 = pink line spectrum, 2 = chromatic arc, 3 = fabric stripes
   function setMode(m) {
     mode = m;
     document.body.classList.toggle('mode-1', m === 1);
     document.body.classList.toggle('mode-2', m === 2);
+    document.body.classList.toggle('mode-3', m === 3);
     mode1Btn.classList.toggle('on', m === 1);
     mode2Btn.classList.toggle('on', m === 2);
+    mode3Btn.classList.toggle('on', m === 3);
   }
 
   let audioCtx = null;
@@ -339,9 +344,11 @@
     }
     if (e.key === '1') setMode(1);
     if (e.key === '2') setMode(2);
+    if (e.key === '3') setMode(3);
   });
   mode1Btn.addEventListener('click', () => setMode(1));
   mode2Btn.addEventListener('click', () => setMode(2));
+  mode3Btn.addEventListener('click', () => setMode(3));
   setMode(1);
 
   // ----- helpers for onset detection -----
@@ -360,7 +367,7 @@
     const dpr = Math.max(1, window.devicePixelRatio || 1);
 
     // Crisp clear — colour depends on the current mode.
-    ctx.fillStyle = mode === 2 ? '#000000' : '#FDFCF4';
+    ctx.fillStyle = (mode === 2 || mode === 3) ? '#000000' : '#FDFCF4';
     ctx.fillRect(0, 0, W, H);
 
     if (!analyser) {
@@ -444,6 +451,7 @@
     phase += 0.005 + totalNow * 0.04 + kickHit * 0.05;
 
     if (mode === 2) { renderArc(W, H, dpr); return; }
+    if (mode === 3) { renderCloth(W, H, dpr); return; }
 
     // ----- background depth: bottom warmth tied to sustained sub/bass -----
     const lowGrad = ctx.createLinearGradient(0, H * 0.55, 0, H);
@@ -715,6 +723,98 @@
     }
   }
 
+  // ---- mode 3: fabric stripes ----
+  // Overlapping rectangular "blocks" of vertical white stripes painted on a
+  // black field. A shared 2D warp field bends every stripe as if the whole
+  // surface were a folded sheet of cloth. Bass + kicks drive fold depth,
+  // per-band energy drives each block's stripe density.
+  const CLOTH_BLOCKS = [
+    { x: 0.00, w: 0.42, y: 0.00, h: 0.36, baseDen: 26, band: 'sub'    },
+    { x: 0.30, w: 0.70, y: 0.05, h: 0.30, baseDen: 42, band: 'bass'   },
+    { x: 0.00, w: 0.58, y: 0.28, h: 0.30, baseDen: 30, band: 'lowMid' },
+    { x: 0.46, w: 0.54, y: 0.34, h: 0.28, baseDen: 50, band: 'mid'    },
+    { x: 0.06, w: 0.54, y: 0.56, h: 0.30, baseDen: 34, band: 'high'   },
+    { x: 0.50, w: 0.50, y: 0.62, h: 0.38, baseDen: 58, band: 'air'    },
+    { x: 0.20, w: 0.40, y: 0.74, h: 0.26, baseDen: 28, band: 'bass'   }
+  ];
+
+  function clothWarp(x, y, W, H, p, amp) {
+    const xN = x / W;
+    const yN = y / H;
+    // Three layered sines at different frequencies = soft fabric folds
+    const w1 = Math.sin(yN * Math.PI * 1.6 + p * 0.35) * amp;
+    const w2 = Math.sin(yN * Math.PI * 3.4 + xN * Math.PI * 0.9 + p * 0.55) * amp * 0.45;
+    const w3 = Math.cos(xN * Math.PI * 2.3 + yN * Math.PI * 0.7 - p * 0.25) * amp * 0.30;
+    return w1 + w2 + w3;
+  }
+
+  function renderCloth(W, H, dpr) {
+    const bandEnergy = {
+      sub:    subAvg + kickHit * 0.6,
+      bass:   bassAvg + bassHit * 0.4,
+      lowMid: lowMidAvg + snareHit * 0.3,
+      mid:    midAvg,
+      high:   highAvg + hatHit * 0.3,
+      air:    airAvg
+    };
+
+    // Fold depth grows with sustained bass + kick punch
+    const warpAmp = (12 + bassAvg * 55 + kickHit * 35 + midAvg * 18) * dpr;
+
+    ctx.fillStyle = '#FFFFFF';
+    ctx.strokeStyle = '#FFFFFF';
+
+    for (let bi = 0; bi < CLOTH_BLOCKS.length; bi++) {
+      const b = CLOTH_BLOCKS[bi];
+      const energy = bandEnergy[b.band] || 0;
+      // Block dimensions in pixels — a touch of per-band sway on x position
+      const sway = Math.sin(phase * 0.4 + bi * 0.9) * (4 + energy * 14) * dpr;
+      const x0 = b.x * W + sway;
+      const y0 = b.y * H;
+      const bw = b.w * W;
+      const bh = b.h * H;
+
+      // Stripe density: baseline + audio
+      const density = Math.max(10, Math.floor(b.baseDen * (0.9 + energy * 1.3)));
+      const spacing = bw / density;
+      // Stripe width: thinner when dense, thicker when sparse, modulated by audio
+      const stripeW = Math.max(0.8, spacing * (0.20 + energy * 0.30));
+
+      // Clip drawing to this block so stripes don't bleed across the field —
+      // that boxy "different swatch" look from the reference image.
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(x0, y0, bw, bh);
+      ctx.clip();
+
+      const segs = 28;
+      for (let i = 0; i < density; i++) {
+        const xCol = x0 + i * spacing + spacing * 0.5;
+
+        ctx.beginPath();
+        for (let s = 0; s <= segs; s++) {
+          const t = s / segs;
+          const y = y0 + t * bh;
+          const dx = clothWarp(xCol, y, W, H, phase + bi * 0.4, warpAmp);
+          if (s === 0) ctx.moveTo(xCol + dx, y);
+          else ctx.lineTo(xCol + dx, y);
+        }
+        ctx.lineWidth = stripeW;
+        ctx.lineCap = 'butt';
+        ctx.stroke();
+      }
+
+      ctx.restore();
+    }
+
+    // Subtle vignette so the edges fall off gently
+    const vig = ctx.createRadialGradient(W * 0.5, H * 0.5, Math.min(W, H) * 0.4, W * 0.5, H * 0.5, Math.max(W, H) * 0.7);
+    vig.addColorStop(0, 'rgba(0, 0, 0, 0)');
+    vig.addColorStop(1, 'rgba(0, 0, 0, 0.55)');
+    ctx.fillStyle = vig;
+    ctx.fillRect(0, 0, W, H);
+  }
+
   // ---- event spawners ----
   function spawnRipple(W, H, dpr, strength) {
     // One ripple per kick — centre-ish, expanding outward
@@ -751,6 +851,44 @@
   }
 
   function drawIdleHint(W, H, dpr) {
+    if (mode === 3) {
+      // Idle cloth — fixed energy values, slow phase
+      const t0 = Date.now() * 0.0006;
+      const warpAmp = 18 * dpr;
+      ctx.strokeStyle = '#FFFFFF';
+      for (let bi = 0; bi < CLOTH_BLOCKS.length; bi++) {
+        const b = CLOTH_BLOCKS[bi];
+        const x0 = b.x * W;
+        const y0 = b.y * H;
+        const bw = b.w * W;
+        const bh = b.h * H;
+        const density = Math.max(12, Math.floor(b.baseDen * 0.85));
+        const spacing = bw / density;
+        const stripeW = Math.max(0.7, spacing * 0.22);
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(x0, y0, bw, bh);
+        ctx.clip();
+        const segs = 22;
+        for (let i = 0; i < density; i++) {
+          const xCol = x0 + i * spacing + spacing * 0.5;
+          ctx.beginPath();
+          for (let s = 0; s <= segs; s++) {
+            const t = s / segs;
+            const y = y0 + t * bh;
+            const dx = clothWarp(xCol, y, W, H, t0 + bi * 0.4, warpAmp);
+            if (s === 0) ctx.moveTo(xCol + dx, y);
+            else ctx.lineTo(xCol + dx, y);
+          }
+          ctx.lineWidth = stripeW;
+          ctx.globalAlpha = 0.55;
+          ctx.stroke();
+        }
+        ctx.restore();
+      }
+      ctx.globalAlpha = 1;
+      return;
+    }
     if (mode === 2) {
       if (!arcSprite || arcSpriteDpr !== dpr) buildArcSprite(dpr);
       const minDim = Math.min(W, H);
@@ -805,7 +943,7 @@
     if (running) return;
     const W = canvas.width, H = canvas.height;
     const dpr = Math.max(1, window.devicePixelRatio || 1);
-    ctx.fillStyle = mode === 2 ? '#000000' : '#FDFCF4';
+    ctx.fillStyle = (mode === 2 || mode === 3) ? '#000000' : '#FDFCF4';
     ctx.fillRect(0, 0, W, H);
     drawIdleHint(W, H, dpr);
     requestAnimationFrame(idleTick);
