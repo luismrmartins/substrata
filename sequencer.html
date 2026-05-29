@@ -365,18 +365,53 @@
 
   /* ----- Live mode: two-deck side-by-side live mixer ----- */
   .live-controls { display: none; }
+  .live-vol-row { display: none; }
   body.mode-live .add-row,
   body.mode-live .mixer,
   body.mode-live .steps-row,
   body.mode-live .track-knobs,
   body.mode-live .mic-control { display: none !important; }
   body.mode-live .live-controls {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
     margin: 6px 0 18px;
     padding-bottom: 14px;
     border-bottom: 1px solid var(--line);
+  }
+  .live-decks-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 24px;
+  }
+  .live-xfade-row {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding-top: 10px;
+    border-top: 1px solid var(--line);
+  }
+  .live-xfade-row #live-xfade {
+    flex: 1;
+    accent-color: var(--accent);
+    cursor: ew-resize;
+    height: 18px;
+  }
+  .live-xfade-label {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    color: var(--accent);
+    font-weight: 600;
+    width: 14px;
+    text-align: center;
+  }
+  .live-xfade-readout {
+    font-size: 10px;
+    color: var(--muted);
+    font-variant-numeric: tabular-nums;
+    min-width: 110px;
+    text-align: right;
   }
   .live-deck-ctrl {
     display: flex;
@@ -428,6 +463,7 @@
     display: flex !important;
     flex-direction: row;
     align-items: center;
+    gap: 12px;
     border: 1px solid var(--line);
     border-radius: 3px;
     padding: 6px 10px;
@@ -439,13 +475,13 @@
     display: flex !important;
     flex-direction: row;
     align-items: center;
-    gap: 14px;
-    width: 100%;
+    gap: 10px;
+    flex: 0 0 auto;
   }
   body.mode-live .track-name {
-    font-size: 12px;
+    font-size: 11px;
     font-weight: 500;
-    flex: 1;
+    flex: 0 0 96px;
     min-width: 0;
     white-space: nowrap;
     overflow: hidden;
@@ -453,8 +489,8 @@
   }
   body.mode-live .track-name .chev { display: none; }
   body.mode-live .track-name input.name-input {
-    font-size: 12px;
-    width: 100%;
+    font-size: 11px;
+    width: 92px;
   }
   body.mode-live .toggles {
     display: flex !important;
@@ -463,7 +499,28 @@
     gap: 3px;
     flex-shrink: 0;
   }
-  body.mode-live .toggle { width: 22px; height: 22px; font-size: 10px; }
+  body.mode-live .toggle { width: 20px; height: 20px; font-size: 9px; }
+  /* Per-channel volume slider — takes remaining horizontal space */
+  body.mode-live .live-vol-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex: 1;
+    min-width: 60px;
+  }
+  body.mode-live .live-vol-row input[type="range"] {
+    flex: 1;
+    accent-color: var(--accent);
+    cursor: ew-resize;
+    height: 14px;
+  }
+  body.mode-live .live-vol-row .live-vol-val {
+    font-size: 10px;
+    color: var(--muted);
+    font-variant-numeric: tabular-nums;
+    width: 32px;
+    text-align: right;
+  }
   body.mode-live .master-strip { display: none !important; }
   body.mode-live .mix-eq-wrap,
   body.mode-live .mix-strip { display: none !important; }
@@ -1034,29 +1091,38 @@
       </div>
 
       <div class="live-controls" id="live-controls">
-        <div class="live-deck-ctrl" data-deck="A">
-          <div class="live-deck-head">
-            <span class="live-deck-label">Deck A</span>
-            <span class="live-deck-name" id="live-name-A">— no project loaded —</span>
+        <div class="live-decks-row">
+          <div class="live-deck-ctrl" data-deck="A">
+            <div class="live-deck-head">
+              <span class="live-deck-label">Deck A</span>
+              <span class="live-deck-name" id="live-name-A">— no project loaded —</span>
+            </div>
+            <div class="live-deck-btns">
+              <button class="small" id="live-load-A">Load project →</button>
+              <button class="small" id="live-mute-A" title="Mute every channel on Deck A">Mute all</button>
+              <button class="small" id="live-unmute-A" title="Unmute every channel on Deck A">Unmute all</button>
+              <button class="small" id="live-clear-A" title="Remove all Deck A channels">Clear</button>
+            </div>
           </div>
-          <div class="live-deck-btns">
-            <button class="small" id="live-load-A">Load project →</button>
-            <button class="small" id="live-mute-A" title="Mute every channel on Deck A">Mute all</button>
-            <button class="small" id="live-unmute-A" title="Unmute every channel on Deck A">Unmute all</button>
-            <button class="small" id="live-clear-A" title="Remove all Deck A channels">Clear</button>
+          <div class="live-deck-ctrl" data-deck="B">
+            <div class="live-deck-head">
+              <span class="live-deck-label">Deck B</span>
+              <span class="live-deck-name" id="live-name-B">— no project loaded —</span>
+            </div>
+            <div class="live-deck-btns">
+              <button class="small" id="live-load-B">Load project →</button>
+              <button class="small" id="live-mute-B" title="Mute every channel on Deck B">Mute all</button>
+              <button class="small" id="live-unmute-B" title="Unmute every channel on Deck B">Unmute all</button>
+              <button class="small" id="live-clear-B" title="Remove all Deck B channels">Clear</button>
+            </div>
           </div>
         </div>
-        <div class="live-deck-ctrl" data-deck="B">
-          <div class="live-deck-head">
-            <span class="live-deck-label">Deck B</span>
-            <span class="live-deck-name" id="live-name-B">— no project loaded —</span>
-          </div>
-          <div class="live-deck-btns">
-            <button class="small" id="live-load-B">Load project →</button>
-            <button class="small" id="live-mute-B" title="Mute every channel on Deck B">Mute all</button>
-            <button class="small" id="live-unmute-B" title="Unmute every channel on Deck B">Unmute all</button>
-            <button class="small" id="live-clear-B" title="Remove all Deck B channels">Clear</button>
-          </div>
+        <div class="live-xfade-row">
+          <span class="live-xfade-label">A</span>
+          <input type="range" id="live-xfade" min="0" max="1" step="0.005" value="0.5"
+                 title="Crossfade between Deck A and Deck B (double-click to center)">
+          <span class="live-xfade-label">B</span>
+          <span class="live-xfade-readout" id="live-xfade-readout">A 1.00 · B 1.00</span>
         </div>
       </div>
       <div id="tracks" class="tracks"></div>
@@ -5074,6 +5140,31 @@
 
     wrap.appendChild(meta);
 
+    // Live-mode per-channel volume slider (hidden by CSS outside live mode)
+    const liveVolRow = el('div', 'live-vol-row');
+    const liveVol = el('input');
+    liveVol.type = 'range'; liveVol.min = 0; liveVol.max = 1.2; liveVol.step = 0.01;
+    liveVol.value = track.volume;
+    const liveVolVal = el('span', 'live-vol-val', Number(track.volume).toFixed(2));
+    liveVol.addEventListener('input', () => {
+      const v = parseFloat(liveVol.value);
+      track.volume = v;
+      liveVolVal.textContent = v.toFixed(2);
+      if (track.volNode && audioCtx) {
+        track.volNode.gain.setTargetAtTime(v, audioCtx.currentTime, 0.01);
+      }
+      // Keep the Mix-tab fader in sync if it was built
+      if (track._mixFader) {
+        track._mixFader.value = v;
+        if (track._mixVolLabel) track._mixVolLabel.textContent = v.toFixed(2);
+      }
+    });
+    liveVolRow.appendChild(liveVol);
+    liveVolRow.appendChild(liveVolVal);
+    track._liveVol = liveVol;
+    track._liveVolVal = liveVolVal;
+    wrap.appendChild(liveVolRow);
+
     if (track.kind === 'mic') {
       const mic = el('div', 'mic-control');
       const btn = el('button', null, track.enabled ? 'Live' : 'Enable Mic');
@@ -6435,6 +6526,10 @@
     if (!audioCtx) return;
     if (t.input) return; // already initialised
     t.input        = audioCtx.createGain();
+    // Per-track deck-crossfader gain — set from the live crossfader. Placed
+    // before volNode so it scales the signal feeding the sends too.
+    t.deckGainN    = audioCtx.createGain();
+    t.deckGainN.gain.value = deckGainFor(t.deck);
     t.volNode      = audioCtx.createGain();   t.volNode.gain.value      = t.volume;
     t.trkLfoMod    = audioCtx.createGain();   t.trkLfoMod.gain.value    = 1; // tremolo carrier
     t.trkPanNode   = audioCtx.createStereoPanner(); t.trkPanNode.pan.value = 0;
@@ -6451,7 +6546,7 @@
     // Meter analyser (cheap, parallel observer after vol/EQ)
     t.trkMeter = audioCtx.createAnalyser();
     t.trkMeter.fftSize = 256;
-    t.input.connect(t.volNode);
+    t.input.connect(t.deckGainN).connect(t.volNode);
     t.volNode.connect(t.trkLfoMod).connect(t.trkPanNode)
              .connect(t.trkEqLow).connect(t.trkEqMid).connect(t.trkEqHigh)
              .connect(t.duckGain);
@@ -6500,7 +6595,7 @@
     if (t._scopeStop !== undefined) t._scopeStop = true;
     if (t.trkLfo) { try { t.trkLfo.stop(); } catch (e) {} try { t.trkLfo.disconnect(); } catch (e) {} t.trkLfo = null; }
     ['trkLfoVolG','trkLfoPanG','trkLfoMod','trkPanNode','trkEqLow','trkEqMid','trkEqHigh','trkMeter',
-     'micSource','inputGainN','hpf','micGate','analyser','input','volNode','duckGain',
+     'micSource','inputGainN','hpf','micGate','analyser','input','deckGainN','volNode','duckGain',
      'delaySendN','reverbSendN','chorusSendN','flangerSendN','bitcrushSendN']
       .forEach(k => { if (t[k]) { try { t[k].disconnect(); } catch (e) {} t[k] = null; } });
     if (t.eqNodes) { t.eqNodes.forEach(n => { try { n.disconnect(); } catch (e) {} }); t.eqNodes = null; }
@@ -7070,8 +7165,35 @@
   // Loads two saved projects side-by-side. Each loaded project's tracks are
   // tagged with their deck (A or B) and appended to the global tracks array
   // so they all run on the shared transport / scheduler — no pre-rendering.
-  // The user mixes by muting / unmuting channels on each deck.
+  // The user mixes by muting / unmuting channels on each deck, sets per-
+  // channel volume with horizontal faders, and crossfades the two decks
+  // with the master crossfader.
   const liveDecks = { A: { projectName: '' }, B: { projectName: '' } };
+  // Crossfader: x = 0 → only A, x = 0.5 → both at full, x = 1 → only B.
+  // V-shape with a flat region around center — a DJ-style crossfade where
+  // the centre keeps both decks audible at full volume.
+  const liveDeckGain = { A: 1, B: 1, x: 0.5 };
+  function deckGainFor(deck) {
+    if (deck === 'A') return liveDeckGain.A;
+    if (deck === 'B') return liveDeckGain.B;
+    return 1;  // unassigned tracks aren't affected by the crossfader
+  }
+  function setLiveCrossfade(x) {
+    x = Math.max(0, Math.min(1, x));
+    liveDeckGain.x = x;
+    // V-shape — at x=0.5 both decks at 1.0; at x=0 only A; at x=1 only B.
+    liveDeckGain.A = Math.max(0, Math.min(1, 2 * (1 - x)));
+    liveDeckGain.B = Math.max(0, Math.min(1, 2 * x));
+    if (audioCtx) {
+      for (const t of tracks) {
+        if (!t.deckGainN) continue;
+        const g = deckGainFor(t.deck);
+        t.deckGainN.gain.setTargetAtTime(g, audioCtx.currentTime, 0.02);
+      }
+    }
+    const r = document.getElementById('live-xfade-readout');
+    if (r) r.textContent = 'A ' + liveDeckGain.A.toFixed(2) + ' · B ' + liveDeckGain.B.toFixed(2);
+  }
 
   function updateLiveDeckLabels() {
     const a = document.getElementById('live-name-A');
@@ -7116,7 +7238,11 @@
       t.deck = deck;
       if (t.kind === 'mic') { t.enabled = false; t.stream = null; t.micSource = null; }
       tracks.push(t);
-      if (audioCtx) initTrackAudio(t);
+      if (audioCtx) {
+        initTrackAudio(t);
+        // initTrackAudio reads deckGainFor(t.deck) so the gain already matches
+        // the current crossfader position.
+      }
     }
     liveDecks[deck].projectName = fileName || data.name || ('set ' + deck);
     // First loaded deck dictates BPM; subsequent loads preserve the running tempo.
@@ -7166,6 +7292,15 @@
     if (unmuteBtn) unmuteBtn.addEventListener('click', () => setDeckMute(d, false));
     if (clearBtn)  clearBtn.addEventListener('click',  () => clearDeck(d));
   });
+  const xfadeEl = document.getElementById('live-xfade');
+  if (xfadeEl) {
+    xfadeEl.addEventListener('input', () => setLiveCrossfade(parseFloat(xfadeEl.value)));
+    xfadeEl.addEventListener('dblclick', () => {
+      xfadeEl.value = 0.5;
+      setLiveCrossfade(0.5);
+    });
+  }
+  setLiveCrossfade(0.5);
   updateLiveDeckLabels();
 
   function openLoadDialog() {
