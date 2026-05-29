@@ -109,7 +109,9 @@
     text-transform: uppercase; letter-spacing: 0.8px; cursor: pointer;
   }
   button.play.playing { background: transparent; color: var(--text); outline: 1px solid var(--accent); }
-  .transport button.small {
+  .transport button.small,
+  .live-controls button.small,
+  .module button.small {
     background: transparent;
     border: 1px solid var(--cell-border);
     color: var(--text);
@@ -120,8 +122,12 @@
     padding: 5px 10px;
     cursor: pointer;
   }
-  .transport button.small:hover { border-color: var(--text); }
-  .transport button.small.on { background: var(--text); color: var(--bg); border-color: var(--text); }
+  .transport button.small:hover,
+  .live-controls button.small:hover,
+  .module button.small:hover { border-color: var(--text); }
+  .transport button.small.on,
+  .live-controls button.small.on,
+  .module button.small.on { background: var(--text); color: var(--bg); border-color: var(--text); }
 
   .mode-toggle {
     display: inline-flex;
@@ -330,11 +336,15 @@
     color: var(--text);
   }
   .mix-eq-row input[type="range"] {
-    grid-column: 1 / -1;
+    grid-column: 1;
     width: 100%;
     height: 14px;
     accent-color: var(--text);
     margin: 0;
+  }
+  .mix-eq-row .eq-kill {
+    grid-column: 2;
+    align-self: center;
   }
   .mix-meter {
     width: 8px;
@@ -446,6 +456,54 @@
     flex-wrap: wrap;
     gap: 6px;
   }
+  .live-deck-eq {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    margin-top: 4px;
+    padding: 6px 8px;
+    border: 1px solid var(--line);
+    border-radius: 3px;
+  }
+  .live-deck-eq-row {
+    display: grid;
+    grid-template-columns: 16px 1fr 36px 16px;
+    column-gap: 6px;
+    align-items: center;
+    font-size: 9px;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+  .live-deck-eq-row input[type="range"] {
+    height: 12px;
+    accent-color: var(--text);
+  }
+  .live-deck-eq-row .v {
+    text-align: right;
+    color: var(--text);
+    font-variant-numeric: tabular-nums;
+  }
+  /* Kill-band button — toggles a band to its minimum (-15 dB) and back */
+  .eq-kill {
+    background: transparent;
+    border: 1px solid var(--cell-border);
+    color: var(--muted);
+    font: inherit;
+    font-size: 8px;
+    width: 16px;
+    height: 16px;
+    line-height: 14px;
+    padding: 0;
+    cursor: pointer;
+    text-align: center;
+  }
+  .eq-kill:hover { border-color: var(--text); color: var(--text); }
+  .eq-kill.on {
+    background: var(--accent);
+    color: #fff;
+    border-color: var(--accent);
+  }
   body.mode-live #tracks {
     display: grid;
     grid-template-columns: 1fr 1fr;
@@ -525,6 +583,17 @@
   body.mode-live .mix-eq-wrap,
   body.mode-live .mix-strip { display: none !important; }
   body.mode-live .empty-hint { display: none; }
+  /* Hide live-mode-irrelevant per-channel buttons (duplicate, group, delete) */
+  body.mode-live .toggle.dup,
+  body.mode-live .toggle.grp,
+  body.mode-live .toggle.rmv { display: none !important; }
+  /* Hide the deck-level "Mute all / Unmute all" — per-channel mutes do it better */
+  body.mode-live #live-mute-A,
+  body.mode-live #live-mute-B,
+  body.mode-live #live-unmute-A,
+  body.mode-live #live-unmute-B { display: none !important; }
+  /* Mixer (deck audio mixer) is gone from the Effects tab now */
+  .mixer { display: none !important; }
   @media (max-width: 720px) {
     body.mode-live #tracks { grid-template-columns: 1fr; }
     body.mode-live .live-controls { grid-template-columns: 1fr; }
@@ -776,6 +845,7 @@
   }
   .side .row select:focus { outline: none; border-bottom-color: var(--text); }
   .side .row.wide { grid-template-columns: 56px 1fr; }
+  .side .row.eq-row { grid-template-columns: 56px 1fr 34px 20px; column-gap: 6px; }
   .sync-ctrls { display: flex; gap: 6px; align-items: center; }
   .sync-ctrls select {
     background: transparent;
@@ -1103,6 +1173,7 @@
               <button class="small" id="live-unmute-A" title="Unmute every channel on Deck A">Unmute all</button>
               <button class="small" id="live-clear-A" title="Remove all Deck A channels">Clear</button>
             </div>
+            <div class="live-deck-eq" id="live-deck-eq-A"></div>
           </div>
           <div class="live-deck-ctrl" data-deck="B">
             <div class="live-deck-head">
@@ -1115,6 +1186,7 @@
               <button class="small" id="live-unmute-B" title="Unmute every channel on Deck B">Unmute all</button>
               <button class="small" id="live-clear-B" title="Remove all Deck B channels">Clear</button>
             </div>
+            <div class="live-deck-eq" id="live-deck-eq-B"></div>
           </div>
         </div>
         <div class="live-xfade-row">
@@ -1130,6 +1202,7 @@
     </main>
 
     <aside class="side">
+      <div class="module" id="fx-racks"></div>
       <div class="module" id="master"></div>
       <div class="module" id="comp"></div>
       <div class="module" id="ducker"></div>
@@ -2908,6 +2981,17 @@
 
   // ---------- audio graph ----------
   let masterIn, masterOut, eqLow, eqMid, eqHigh, warmLow, warmHigh, warmShaper, compressor, masterLP, masterHP, masterLimiter, masterMeter;
+  // Per-deck EQ buses (live mode) — tracks of each deck route their duckGain
+  // into the deck's lowshelf which chains through mid (peaking) → high (highshelf)
+  // → masterIn. Created in initAudio().
+  let deckABusEqLow, deckABusEqMid, deckABusEqHigh;
+  let deckBBusEqLow, deckBBusEqMid, deckBBusEqHigh;
+  const liveDeckEq = { A: { low: 0, mid: 0, high: 0 }, B: { low: 0, mid: 0, high: 0 } };
+  function deckBusInputFor(deck) {
+    if (deck === 'A' && deckABusEqLow) return deckABusEqLow;
+    if (deck === 'B' && deckBBusEqLow) return deckBBusEqLow;
+    return masterIn;
+  }
   let delayBus, delayNode, delayFb, delayWet;
   let reverbBus, reverbNode, reverbWet;
   let chorusBus, chorusDelL, chorusDelR, chorusLfoL, chorusLfoR, chorusModL, chorusModR, chorusWet;
@@ -3062,6 +3146,15 @@
     eqLow      = audioCtx.createBiquadFilter(); eqLow.type ='lowshelf';  eqLow.frequency.value  = 200;
     eqMid      = audioCtx.createBiquadFilter(); eqMid.type ='peaking';   eqMid.frequency.value  = 1000; eqMid.Q.value = 0.8;
     eqHigh     = audioCtx.createBiquadFilter(); eqHigh.type='highshelf'; eqHigh.frequency.value = 5000;
+    // Per-deck EQ buses for live mode.
+    deckABusEqLow  = audioCtx.createBiquadFilter(); deckABusEqLow.type='lowshelf';   deckABusEqLow.frequency.value  = 200;  deckABusEqLow.gain.value  = liveDeckEq.A.low;
+    deckABusEqMid  = audioCtx.createBiquadFilter(); deckABusEqMid.type='peaking';    deckABusEqMid.frequency.value  = 1000; deckABusEqMid.Q.value = 0.8; deckABusEqMid.gain.value = liveDeckEq.A.mid;
+    deckABusEqHigh = audioCtx.createBiquadFilter(); deckABusEqHigh.type='highshelf'; deckABusEqHigh.frequency.value = 5000; deckABusEqHigh.gain.value = liveDeckEq.A.high;
+    deckBBusEqLow  = audioCtx.createBiquadFilter(); deckBBusEqLow.type='lowshelf';   deckBBusEqLow.frequency.value  = 200;  deckBBusEqLow.gain.value  = liveDeckEq.B.low;
+    deckBBusEqMid  = audioCtx.createBiquadFilter(); deckBBusEqMid.type='peaking';    deckBBusEqMid.frequency.value  = 1000; deckBBusEqMid.Q.value = 0.8; deckBBusEqMid.gain.value = liveDeckEq.B.mid;
+    deckBBusEqHigh = audioCtx.createBiquadFilter(); deckBBusEqHigh.type='highshelf'; deckBBusEqHigh.frequency.value = 5000; deckBBusEqHigh.gain.value = liveDeckEq.B.high;
+    deckABusEqLow.connect(deckABusEqMid).connect(deckABusEqHigh).connect(masterIn);
+    deckBBusEqLow.connect(deckBBusEqMid).connect(deckBBusEqHigh).connect(masterIn);
     warmLow    = audioCtx.createBiquadFilter(); warmLow.type='lowshelf';  warmLow.frequency.value  = 180;  warmLow.gain.value  =  1.5 * master.warmth;
     warmHigh   = audioCtx.createBiquadFilter(); warmHigh.type='highshelf'; warmHigh.frequency.value = 4500; warmHigh.gain.value = -2.5 * master.warmth;
     warmShaper = audioCtx.createWaveShaper();   warmShaper.curve = makeWarmthCurve(master.warmth);
@@ -3334,6 +3427,38 @@
       v.textContent = fmt(x); onChange(x);
     });
     row.appendChild(r); row.appendChild(v);
+    parent.appendChild(row);
+  }
+  // Same as sideRow but adds an EQ-kill button that toggles the band between
+  // its current value and -15 dB. Used for master EQ low/mid/high.
+  function sideRowEq(parent, label, val, onChange) {
+    const row = el('div', 'row eq-row');
+    row.appendChild(el('label', null, label));
+    const r = el('input'); r.type='range'; r.min=-15; r.max=15; r.step=0.5; r.value=val;
+    const fmt = x => (x >= 0 ? '+' : '') + Number(x).toFixed(1);
+    const v = el('span', 'v', fmt(val));
+    let saved = val;
+    let killed = false;
+    const kill = el('button', 'eq-kill', '✕');
+    kill.title = 'kill this band (-15 dB)';
+    r.addEventListener('input', () => {
+      const x = parseFloat(r.value);
+      if (killed) { killed = false; kill.classList.remove('on'); }
+      saved = x;
+      v.textContent = fmt(x);
+      onChange(x);
+    });
+    kill.addEventListener('click', (e) => {
+      e.preventDefault();
+      killed = !killed;
+      kill.classList.toggle('on', killed);
+      if (killed) { saved = parseFloat(r.value); r.value = -15; }
+      else { r.value = saved; }
+      const x = parseFloat(r.value);
+      v.textContent = fmt(x);
+      onChange(x);
+    });
+    row.appendChild(r); row.appendChild(v); row.appendChild(kill);
     parent.appendChild(row);
   }
 
@@ -5100,12 +5225,14 @@
     aBtn.addEventListener('click', (e) => {
       e.stopPropagation();
       const visible = (track._pendingArmed !== undefined) ? track._pendingArmed : track.armed;
-      setArmedAcross(track, !visible, currentMode === 'mixing');
+      const deferred = currentMode === 'mixing' || currentMode === 'live';
+      setArmedAcross(track, !visible, deferred);
     });
     mBtn.addEventListener('click', (e) => {
       e.stopPropagation();
       const visible = (track._pendingMute !== undefined) ? track._pendingMute : track.mute;
-      setMuteAcross(track, !visible, currentMode === 'mixing');
+      const deferred = currentMode === 'mixing' || currentMode === 'live';
+      setMuteAcross(track, !visible, deferred);
     });
     sBtn.addEventListener('click', (e) => {
       e.stopPropagation();
@@ -5209,12 +5336,33 @@
       row.appendChild(valEl);
       const r = el('input'); r.type='range';
       r.min = -15; r.max = 15; r.step = 0.5; r.value = val;
+      let saved = val;
+      let killed = false;
+      const kill = el('button', 'eq-kill', '✕');
+      kill.title = 'kill this band (-15 dB)';
       r.addEventListener('input', () => {
+        const v = parseFloat(r.value);
+        if (killed) { killed = false; kill.classList.remove('on'); }
+        saved = v;
+        valEl.textContent = fmtEq(v);
+        onChange(v);
+      });
+      kill.addEventListener('click', (e) => {
+        e.preventDefault();
+        killed = !killed;
+        kill.classList.toggle('on', killed);
+        if (killed) {
+          saved = parseFloat(r.value);
+          r.value = -15;
+        } else {
+          r.value = saved;
+        }
         const v = parseFloat(r.value);
         valEl.textContent = fmtEq(v);
         onChange(v);
       });
       row.appendChild(r);
+      row.appendChild(kill);
       return row;
     };
     eqWrap.appendChild(makeEqRow('HI', track.eqHigh || 0, v => {
@@ -6070,6 +6218,269 @@
     track._cursorIdx = idx;
   }
 
+  // ---------- FX rack presets ----------
+  // A "rack" snapshots every master / FX config — EQ, comp, ducker timing,
+  // delay, reverb, chorus, flanger, bitcrush, tape, lo-fi, LP/HP — so users
+  // can sculpt a master FX chain once and recall it. Master vol and the
+  // ducker source are deliberately excluded (they're project-specific).
+  const FX_RACK_FACTORY = {
+    'Neutral': {
+      master:      { low: 0, mid: 0, high: 0, warmth: 0 },
+      compCfg:     { threshold: -18, ratio: 4, attack: 0.005, release: 0.18, knee: 6 },
+      duckCfg:     { attack: 0.012, release: 0.22 },
+      delayCfg:    { time: 0.375, fb: 0.45, wet: 0,    sync: false, div: '1/4' },
+      reverbCfg:   { decay: 2.5, wet: 0 },
+      chorusCfg:   { rate: 0.6, depth: 0.6, wet: 0 },
+      flangerCfg:  { rate: 0.3, depth: 0.6, fb: 0.4, wet: 0 },
+      bitcrushCfg: { bits: 8, normFreq: 0.4, wet: 0 },
+      tapeCfg:     { wow: 0, flutter: 0, crackle: 0, hiss: 0, sat: 0, tone: 0, wet: 0 },
+      lofiCfg:     { drive: 0, hiCut: 12000, wobble: 0, dust: 0, wet: 0 },
+      lpfCfg:      { freq: 22000, q: 0.7 },
+      hpfCfg:      { freq: 20, q: 0.7 }
+    },
+    'Dub Chamber': {
+      master:      { low: 1.5, mid: -1, high: -2, warmth: 0.25 },
+      compCfg:     { threshold: -16, ratio: 3, attack: 0.008, release: 0.22, knee: 8 },
+      duckCfg:     { attack: 0.012, release: 0.22 },
+      delayCfg:    { time: 0.375, fb: 0.62, wet: 0.55, sync: true, div: '3/8' },
+      reverbCfg:   { decay: 5.5, wet: 0.60 },
+      chorusCfg:   { rate: 0.4, depth: 0.3, wet: 0.15 },
+      flangerCfg:  { rate: 0.3, depth: 0.6, fb: 0.4, wet: 0 },
+      bitcrushCfg: { bits: 8, normFreq: 0.4, wet: 0 },
+      tapeCfg:     { wow: 0.15, flutter: 0.10, crackle: 0.10, hiss: 0.08, sat: 0.20, tone: -0.10, wet: 0.40 },
+      lofiCfg:     { drive: 0, hiCut: 12000, wobble: 0, dust: 0, wet: 0 },
+      lpfCfg:      { freq: 8000, q: 0.8 },
+      hpfCfg:      { freq: 40, q: 0.7 }
+    },
+    'Vinyl Lounge': {
+      master:      { low: 0.5, mid: 0, high: -1, warmth: 0.4 },
+      compCfg:     { threshold: -14, ratio: 2.5, attack: 0.012, release: 0.25, knee: 8 },
+      duckCfg:     { attack: 0.012, release: 0.22 },
+      delayCfg:    { time: 0.25, fb: 0.35, wet: 0.20, sync: true, div: '1/4' },
+      reverbCfg:   { decay: 2.8, wet: 0.25 },
+      chorusCfg:   { rate: 0.6, depth: 0.5, wet: 0.20 },
+      flangerCfg:  { rate: 0.3, depth: 0.6, fb: 0.4, wet: 0 },
+      bitcrushCfg: { bits: 8, normFreq: 0.4, wet: 0 },
+      tapeCfg:     { wow: 0.30, flutter: 0.25, crackle: 0.25, hiss: 0.15, sat: 0.40, tone: -0.15, wet: 0.60 },
+      lofiCfg:     { drive: 0.30, hiCut: 6000, wobble: 0.20, dust: 0.15, wet: 0.40 },
+      lpfCfg:      { freq: 14000, q: 0.7 },
+      hpfCfg:      { freq: 30, q: 0.7 }
+    },
+    'Berghain Tunnel': {
+      master:      { low: 2, mid: -0.5, high: -1.5, warmth: 0.15 },
+      compCfg:     { threshold: -22, ratio: 6, attack: 0.003, release: 0.15, knee: 4 },
+      duckCfg:     { attack: 0.008, release: 0.25 },
+      delayCfg:    { time: 0.5, fb: 0.50, wet: 0.30, sync: true, div: '1/2' },
+      reverbCfg:   { decay: 7.5, wet: 0.55 },
+      chorusCfg:   { rate: 0.6, depth: 0.6, wet: 0 },
+      flangerCfg:  { rate: 0.18, depth: 0.65, fb: 0.5, wet: 0.20 },
+      bitcrushCfg: { bits: 12, normFreq: 0.55, wet: 0.12 },
+      tapeCfg:     { wow: 0.10, flutter: 0.08, crackle: 0.05, hiss: 0.05, sat: 0.30, tone: -0.20, wet: 0.35 },
+      lofiCfg:     { drive: 0, hiCut: 12000, wobble: 0, dust: 0, wet: 0 },
+      lpfCfg:      { freq: 9000, q: 0.7 },
+      hpfCfg:      { freq: 45, q: 0.7 }
+    },
+    'Ambient Bath': {
+      master:      { low: 0, mid: -1, high: 1, warmth: 0.5 },
+      compCfg:     { threshold: -10, ratio: 2, attack: 0.020, release: 0.40, knee: 10 },
+      duckCfg:     { attack: 0.025, release: 0.40 },
+      delayCfg:    { time: 0.375, fb: 0.45, wet: 0,    sync: true, div: '3/8' },
+      reverbCfg:   { decay: 8.5, wet: 0.75 },
+      chorusCfg:   { rate: 0.3, depth: 0.7, wet: 0.50 },
+      flangerCfg:  { rate: 0.3, depth: 0.6, fb: 0.4, wet: 0 },
+      bitcrushCfg: { bits: 8, normFreq: 0.4, wet: 0 },
+      tapeCfg:     { wow: 0.10, flutter: 0.05, crackle: 0, hiss: 0.05, sat: 0.15, tone: 0, wet: 0.25 },
+      lofiCfg:     { drive: 0, hiCut: 14000, wobble: 0.10, dust: 0, wet: 0.15 },
+      lpfCfg:      { freq: 18000, q: 0.6 },
+      hpfCfg:      { freq: 25, q: 0.7 }
+    },
+    'Lo-Fi House': {
+      master:      { low: 1, mid: 0, high: -1.5, warmth: 0.3 },
+      compCfg:     { threshold: -18, ratio: 4, attack: 0.005, release: 0.18, knee: 6 },
+      duckCfg:     { attack: 0.012, release: 0.22 },
+      delayCfg:    { time: 0.375, fb: 0.40, wet: 0.20, sync: true, div: '3/8' },
+      reverbCfg:   { decay: 2.2, wet: 0.30 },
+      chorusCfg:   { rate: 0.6, depth: 0.6, wet: 0 },
+      flangerCfg:  { rate: 0.3, depth: 0.6, fb: 0.4, wet: 0 },
+      bitcrushCfg: { bits: 10, normFreq: 0.5, wet: 0.10 },
+      tapeCfg:     { wow: 0.20, flutter: 0.15, crackle: 0.30, hiss: 0.20, sat: 0.35, tone: -0.10, wet: 0.50 },
+      lofiCfg:     { drive: 0.40, hiCut: 7500, wobble: 0.25, dust: 0.25, wet: 0.55 },
+      lpfCfg:      { freq: 13000, q: 0.7 },
+      hpfCfg:      { freq: 30, q: 0.7 }
+    },
+    'Crisp Mainroom': {
+      master:      { low: 0.5, mid: 0, high: 1.5, warmth: 0 },
+      compCfg:     { threshold: -16, ratio: 5, attack: 0.003, release: 0.12, knee: 4 },
+      duckCfg:     { attack: 0.008, release: 0.18 },
+      delayCfg:    { time: 0.25, fb: 0.40, wet: 0.18, sync: true, div: '1/4' },
+      reverbCfg:   { decay: 2.8, wet: 0.22 },
+      chorusCfg:   { rate: 0.6, depth: 0.4, wet: 0.12 },
+      flangerCfg:  { rate: 0.3, depth: 0.6, fb: 0.4, wet: 0 },
+      bitcrushCfg: { bits: 8, normFreq: 0.4, wet: 0 },
+      tapeCfg:     { wow: 0, flutter: 0, crackle: 0, hiss: 0, sat: 0.10, tone: 0, wet: 0.15 },
+      lofiCfg:     { drive: 0, hiCut: 12000, wobble: 0, dust: 0, wet: 0 },
+      lpfCfg:      { freq: 22000, q: 0.7 },
+      hpfCfg:      { freq: 35, q: 0.7 }
+    }
+  };
+
+  function getUserFxRacks() {
+    try { return JSON.parse(localStorage.getItem('substrata.fxRacks') || '{}'); }
+    catch (e) { return {}; }
+  }
+  function setUserFxRacks(racks) {
+    try { localStorage.setItem('substrata.fxRacks', JSON.stringify(racks)); }
+    catch (e) { console.warn('Could not save FX rack to localStorage:', e); }
+  }
+
+  function captureCurrentFxRack() {
+    return {
+      master:      { low: master.low, mid: master.mid, high: master.high, warmth: master.warmth },
+      compCfg:     { ...compCfg },
+      duckCfg:     { attack: duckCfg.attack, release: duckCfg.release },
+      delayCfg:    { ...delayCfg },
+      reverbCfg:   { ...reverbCfg },
+      chorusCfg:   { ...chorusCfg },
+      flangerCfg:  { ...flangerCfg },
+      bitcrushCfg: { ...bitcrushCfg },
+      tapeCfg:     { ...tapeCfg },
+      lofiCfg:     { ...lofiCfg },
+      lpfCfg:      { ...lpfCfg },
+      hpfCfg:      { ...hpfCfg }
+    };
+  }
+
+  function applyFxRack(rack) {
+    if (!rack) return;
+    if (rack.master) {
+      ['low','mid','high','warmth'].forEach(k => {
+        if (rack.master[k] !== undefined) master[k] = rack.master[k];
+      });
+    }
+    if (rack.compCfg)     Object.assign(compCfg, rack.compCfg);
+    if (rack.duckCfg) {
+      if (rack.duckCfg.attack  !== undefined) duckCfg.attack  = rack.duckCfg.attack;
+      if (rack.duckCfg.release !== undefined) duckCfg.release = rack.duckCfg.release;
+    }
+    if (rack.delayCfg)    Object.assign(delayCfg, rack.delayCfg);
+    if (rack.reverbCfg)   Object.assign(reverbCfg, rack.reverbCfg);
+    if (rack.chorusCfg)   Object.assign(chorusCfg, rack.chorusCfg);
+    if (rack.flangerCfg)  Object.assign(flangerCfg, rack.flangerCfg);
+    if (rack.bitcrushCfg) Object.assign(bitcrushCfg, rack.bitcrushCfg);
+    if (rack.tapeCfg)     Object.assign(tapeCfg, rack.tapeCfg);
+    if (rack.lofiCfg)     Object.assign(lofiCfg, rack.lofiCfg);
+    if (rack.lpfCfg)      Object.assign(lpfCfg, rack.lpfCfg);
+    if (rack.hpfCfg)      Object.assign(hpfCfg, rack.hpfCfg);
+    applyAllParams();
+    rebuildFxModules();
+  }
+
+  function rebuildFxModules() {
+    ['master','comp','ducker','delay','reverb','chorus','flanger','bitcrush','tape','lofi','lpfilter','hpfilter'].forEach(id => {
+      const node = document.getElementById(id);
+      if (node) node.innerHTML = '';
+    });
+    buildMaster(); buildComp(); buildDucker();
+    buildDelay(); buildReverb();
+    buildChorus(); buildFlanger(); buildBitcrush(); buildTape(); buildLoFi();
+    buildLPFilter(); buildHPFilter();
+    applyCollapsibles();
+  }
+
+  function buildFxRacks() {
+    const m = document.getElementById('fx-racks');
+    if (!m) return;
+    m.appendChild(el('h2', null, 'FX Rack'));
+
+    // Selector
+    const selRow = el('div', 'row wide');
+    selRow.appendChild(el('label', null, 'Preset'));
+    const sel = el('select');
+    sel.id = 'fx-rack-select';
+
+    const populate = (selectedName) => {
+      sel.innerHTML = '';
+      const placeholder = el('option', null, '— pick a rack —');
+      placeholder.value = '';
+      sel.appendChild(placeholder);
+      const factoryGroup = el('optgroup');
+      factoryGroup.label = 'Factory';
+      Object.keys(FX_RACK_FACTORY).forEach(name => {
+        const opt = el('option', null, name);
+        opt.value = 'factory:' + name;
+        if (selectedName === 'factory:' + name) opt.selected = true;
+        factoryGroup.appendChild(opt);
+      });
+      sel.appendChild(factoryGroup);
+      const user = getUserFxRacks();
+      const userNames = Object.keys(user);
+      if (userNames.length) {
+        const userGroup = el('optgroup');
+        userGroup.label = 'User';
+        userNames.forEach(name => {
+          const opt = el('option', null, name);
+          opt.value = 'user:' + name;
+          if (selectedName === 'user:' + name) opt.selected = true;
+          userGroup.appendChild(opt);
+        });
+        sel.appendChild(userGroup);
+      }
+    };
+    populate();
+
+    sel.addEventListener('change', () => {
+      const v = sel.value;
+      if (!v) return;
+      const [kind, name] = v.split(':');
+      const rack = kind === 'factory' ? FX_RACK_FACTORY[name] : getUserFxRacks()[name];
+      if (rack) applyFxRack(rack);
+    });
+    selRow.appendChild(sel);
+    m.appendChild(selRow);
+
+    // Save / Delete buttons
+    const btnRow = el('div', 'row wide');
+    btnRow.appendChild(el('label', null, ' '));
+    const btns = el('div', 'sync-ctrls');
+
+    const saveBtn = el('button', 'small', 'Save as…');
+    saveBtn.addEventListener('click', () => {
+      const name = window.prompt('Save current FX rack as:', 'My rack');
+      if (!name) return;
+      const trimmed = name.trim();
+      if (!trimmed) return;
+      if (FX_RACK_FACTORY[trimmed]) {
+        alert('That name is reserved for a factory preset. Pick another.');
+        return;
+      }
+      const user = getUserFxRacks();
+      if (user[trimmed] && !confirm('Overwrite existing rack "' + trimmed + '"?')) return;
+      user[trimmed] = captureCurrentFxRack();
+      setUserFxRacks(user);
+      populate('user:' + trimmed);
+    });
+
+    const deleteBtn = el('button', 'small', 'Delete');
+    deleteBtn.addEventListener('click', () => {
+      const v = sel.value;
+      if (!v.startsWith('user:')) {
+        alert('Only user racks can be deleted.');
+        return;
+      }
+      const name = v.slice(5);
+      if (!confirm('Delete user rack "' + name + '"?')) return;
+      const user = getUserFxRacks();
+      delete user[name];
+      setUserFxRacks(user);
+      populate();
+    });
+
+    btns.appendChild(saveBtn);
+    btns.appendChild(deleteBtn);
+    btnRow.appendChild(btns);
+    m.appendChild(btnRow);
+  }
+
   // ---------- side ----------
   function buildMaster() {
     const m = document.getElementById('master');
@@ -6077,15 +6488,15 @@
     sideRow(m, 'Vol',  0, 1.2, 0.01, master.vol, v => {
       master.vol = v; if (masterOut) masterOut.gain.setTargetAtTime(v, audioCtx.currentTime, 0.01);
     }, v => v.toFixed(2));
-    sideRow(m, 'Low',  -15, 15, 0.5, master.low, v => {
+    sideRowEq(m, 'Low',  master.low,  v => {
       master.low = v; if (eqLow) eqLow.gain.setTargetAtTime(v, audioCtx.currentTime, 0.01);
-    }, v => (v >= 0 ? '+' : '') + v.toFixed(1));
-    sideRow(m, 'Mid',  -15, 15, 0.5, master.mid, v => {
+    });
+    sideRowEq(m, 'Mid',  master.mid,  v => {
       master.mid = v; if (eqMid) eqMid.gain.setTargetAtTime(v, audioCtx.currentTime, 0.01);
-    }, v => (v >= 0 ? '+' : '') + v.toFixed(1));
-    sideRow(m, 'High', -15, 15, 0.5, master.high, v => {
+    });
+    sideRowEq(m, 'High', master.high, v => {
       master.high = v; if (eqHigh) eqHigh.gain.setTargetAtTime(v, audioCtx.currentTime, 0.01);
-    }, v => (v >= 0 ? '+' : '') + v.toFixed(1));
+    });
     sideRow(m, 'Warm', 0, 1, 0.01, master.warmth, v => {
       master.warmth = v;
       if (warmShaper) warmShaper.curve = makeWarmthCurve(v);
@@ -6551,7 +6962,7 @@
              .connect(t.trkEqLow).connect(t.trkEqMid).connect(t.trkEqHigh)
              .connect(t.duckGain);
     t.duckGain.connect(t.trkMeter);
-    t.duckGain.connect(masterIn);
+    t.duckGain.connect(deckBusInputFor(t.deck));
     t.duckGain.connect(t.delaySendN).connect(delayBus);
     t.duckGain.connect(t.reverbSendN).connect(reverbBus);
     t.duckGain.connect(t.chorusSendN).connect(chorusBus);
@@ -7058,16 +7469,16 @@
   }
   function rebuildAllUI() {
     tracksEl.innerHTML = '';
-    ['master','comp','ducker','delay','reverb','chorus','flanger','bitcrush','tape','lofi','lpfilter','hpfilter','mixer'].forEach(id => {
+    ['fx-racks','master','comp','ducker','delay','reverb','chorus','flanger','bitcrush','tape','lofi','lpfilter','hpfilter','mixer'].forEach(id => {
       const node = document.getElementById(id);
       if (node) node.innerHTML = '';
     });
     rebuildTracksUI();
+    buildFxRacks();
     buildMaster(); buildComp(); buildDucker();
     buildDelay(); buildReverb();
     buildChorus(); buildFlanger(); buildBitcrush(); buildTape(); buildLoFi();
-  buildLPFilter(); buildHPFilter();
-    buildMixer();
+    buildLPFilter(); buildHPFilter();
     applyCollapsibles();
   }
   async function saveProject(forceRename) {
@@ -7232,10 +7643,14 @@
         tracks.splice(i, 1);
       }
     }
-    // Build new tracks tagged with the target deck
+    // Build new tracks tagged with the target deck. Load every track UNARMED
+    // so the user starts a live set with everything silent and arms what they
+    // want to bring in.
     for (const td of data.tracks) {
       const t = makeTrack(td.kind, td);
       t.deck = deck;
+      t.armed = false;
+      t._pendingArmed = undefined;
       if (t.kind === 'mic') { t.enabled = false; t.stream = null; t.micSource = null; }
       tracks.push(t);
       if (audioCtx) {
@@ -7301,6 +7716,65 @@
     });
   }
   setLiveCrossfade(0.5);
+
+  // ---- per-deck EQ UI ----
+  // Builds 3-band EQ controls (LO/MD/HI) under each deck panel. Each band
+  // has a kill button (✕) that toggles the band to -15 dB (effectively
+  // mutes that frequency range) and back. Saves the previous value so
+  // toggling restores exactly what was there.
+  const fmtEqDb = v => (v > 0 ? '+' : '') + Number(v).toFixed(1);
+
+  function applyDeckEqBand(deck, band, value) {
+    liveDeckEq[deck][band] = value;
+    if (!audioCtx) return;
+    const node = deck === 'A'
+      ? (band === 'low' ? deckABusEqLow : band === 'mid' ? deckABusEqMid : deckABusEqHigh)
+      : (band === 'low' ? deckBBusEqLow : band === 'mid' ? deckBBusEqMid : deckBBusEqHigh);
+    if (node) node.gain.setTargetAtTime(value, audioCtx.currentTime, 0.02);
+  }
+
+  function buildDeckEq(deck) {
+    const host = document.getElementById('live-deck-eq-' + deck);
+    if (!host) return;
+    host.innerHTML = '';
+    [['LO','low'],['MD','mid'],['HI','high']].forEach(([label, band]) => {
+      const row = el('div', 'live-deck-eq-row');
+      row.appendChild(el('span', null, label));
+      const r = el('input'); r.type='range'; r.min=-15; r.max=15; r.step=0.5;
+      r.value = liveDeckEq[deck][band];
+      const valEl = el('span', 'v', fmtEqDb(liveDeckEq[deck][band]));
+      let saved = liveDeckEq[deck][band];
+      let killed = false;
+      const kill = el('button', 'eq-kill', '✕');
+      kill.title = 'kill this band (-15 dB)';
+      r.addEventListener('input', () => {
+        const v = parseFloat(r.value);
+        if (killed) { killed = false; kill.classList.remove('on'); }
+        saved = v;
+        valEl.textContent = fmtEqDb(v);
+        applyDeckEqBand(deck, band, v);
+      });
+      kill.addEventListener('click', () => {
+        killed = !killed;
+        kill.classList.toggle('on', killed);
+        if (killed) {
+          saved = parseFloat(r.value);
+          r.value = -15;
+        } else {
+          r.value = saved;
+        }
+        const v = parseFloat(r.value);
+        valEl.textContent = fmtEqDb(v);
+        applyDeckEqBand(deck, band, v);
+      });
+      row.appendChild(r);
+      row.appendChild(valEl);
+      row.appendChild(kill);
+      host.appendChild(row);
+    });
+  }
+  buildDeckEq('A'); buildDeckEq('B');
+
   updateLiveDeckLabels();
 
   function openLoadDialog() {
@@ -7437,10 +7911,23 @@
     });
   });
 
-  // Realign every track to step 0 — kills accumulated timing drift between channels
+  // Realign every track to step 0 — kills accumulated timing drift.
+  // Defers the snap until every track has crossed its next step boundary so
+  // nothing gets cut mid-step (the cause of the audible stumble).
   document.getElementById('realign').addEventListener('click', () => {
     if (!audioCtx) return;
-    const startTime = audioCtx.currentTime + 0.06;
+    const now = audioCtx.currentTime;
+    let maxNext = now;
+    for (const t of tracks) {
+      if (typeof t.nextNoteTime === 'number' && t.nextNoteTime > maxNext) {
+        maxNext = t.nextNoteTime;
+      }
+    }
+    const bpm = parseFloat(bpmInput.value) || 120;
+    const stepDur = (60 / bpm) / 4;  // 16th-note step duration
+    // One full step past the latest scheduled step — guarantees every track
+    // has finished playing the step it was already committed to.
+    const startTime = maxNext + stepDur;
     for (const t of tracks) {
       t.nextStep = 0;
       t.nextNoteTime = startTime;
@@ -7457,15 +7944,11 @@
   });
 
   rebuildTracksUI();
+  buildFxRacks();
   buildMaster(); buildComp(); buildDucker();
   buildDelay(); buildReverb();
   buildChorus(); buildFlanger(); buildBitcrush(); buildTape(); buildLoFi();
   buildLPFilter(); buildHPFilter();
-
-  // default: mixer starts collapsed
-  document.getElementById('mixer').classList.add('collapsed');
-  document.body.classList.add('mixer-collapsed');
-  buildMixer();
   applyCollapsibles();
 </script>
 </body>
