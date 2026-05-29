@@ -580,107 +580,139 @@
   }
 
   // ---- mode 2: chromatic spectrum arc ----
-  // Inspired by light passing through a prism — a partial ring of vertical rays
-  // diffracting through the full spectrum, with the arc breathing on bass and
-  // each ray length driven by its corresponding FFT bin.
+  // White light refracting through a prism — each ray is itself a full rainbow
+  // (warm inner edge → cool outer edge), softly feathered, additively blended.
+  // The arc breathes on bass, individual rays modulate length per FFT bin,
+  // and a wide halo + outer bloom give the photographic light-leak feel.
   let arcSweep = 0;
+  let arcSprite = null;
+  let arcSpriteW = 0, arcSpriteH = 0, arcSpriteDpr = 0;
+
+  function buildArcSprite(dpr) {
+    const w = Math.max(8, Math.floor(14 * dpr));
+    const h = Math.max(160, Math.floor(280 * dpr));
+    const off = document.createElement('canvas');
+    off.width = w; off.height = h;
+    const c = off.getContext('2d');
+
+    // Vertical rainbow — top is the warm INNER end of the ray, bottom is the
+    // cool OUTER end. Ends are feathered so the ray fades into black.
+    const g = c.createLinearGradient(0, 0, 0, h);
+    g.addColorStop(0.00, 'rgba(255,  60,  40, 0)');
+    g.addColorStop(0.04, 'rgba(255,  60,  40, 0.9)');
+    g.addColorStop(0.14, 'rgba(255, 130,  20, 1.0)');
+    g.addColorStop(0.28, 'rgba(255, 215,  40, 1.0)');
+    g.addColorStop(0.44, 'rgba( 90, 230,  90, 1.0)');
+    g.addColorStop(0.60, 'rgba( 40, 150, 255, 1.0)');
+    g.addColorStop(0.76, 'rgba(120,  70, 240, 1.0)');
+    g.addColorStop(0.90, 'rgba(190,  50, 210, 0.7)');
+    g.addColorStop(1.00, 'rgba(190,  50, 210, 0)');
+    c.fillStyle = g;
+    c.fillRect(0, 0, w, h);
+
+    // Horizontal feather — soft sides so adjacent rays blend, not stripe.
+    const fg = c.createLinearGradient(0, 0, w, 0);
+    fg.addColorStop(0.00, 'rgba(0,0,0,1)');
+    fg.addColorStop(0.50, 'rgba(0,0,0,0)');
+    fg.addColorStop(1.00, 'rgba(0,0,0,1)');
+    c.globalCompositeOperation = 'destination-out';
+    c.fillStyle = fg;
+    c.fillRect(0, 0, w, h);
+    c.globalCompositeOperation = 'source-over';
+
+    arcSprite = off;
+    arcSpriteW = w;
+    arcSpriteH = h;
+    arcSpriteDpr = dpr;
+  }
+
   function renderArc(W, H, dpr) {
+    if (!arcSprite || arcSpriteDpr !== dpr) buildArcSprite(dpr);
+
+    const minDim = Math.min(W, H);
     const cx = W * 0.5;
-    const cy = H * 0.42;
-    const baseR = Math.min(W, H) * (0.26 + bassAvg * 0.04 + kickHit * 0.025);
+    const cy = H * 0.46;
+    // Arc breathes with bass + kicks
+    const baseR = minDim * (0.22 + bassAvg * 0.05 + kickHit * 0.03);
 
-    // Subtle starfield grain — very faint random dots
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.015)';
-    for (let i = 0; i < 18; i++) {
-      const sx = Math.random() * W;
-      const sy = Math.random() * H;
-      ctx.fillRect(sx, sy, dpr, dpr);
-    }
-
-    // Outer halo — pulses with sustained energy
-    const haloA = 0.04 + (bassAvg + midAvg) * 0.12;
-    const halo = ctx.createRadialGradient(cx, cy, baseR * 0.6, cx, cy, baseR * 2.2);
-    halo.addColorStop(0, 'rgba(140, 50, 200, ' + haloA.toFixed(3) + ')');
-    halo.addColorStop(1, 'rgba(0, 0, 0, 0)');
+    // Wide background halo — pulses with sustained energy
+    const haloA = 0.05 + (bassAvg + midAvg) * 0.10 + kickHit * 0.05;
+    const halo = ctx.createRadialGradient(cx, cy, baseR * 0.3, cx, cy, baseR * 2.6);
+    halo.addColorStop(0.00, 'rgba(120,  40, 180, ' + haloA.toFixed(3) + ')');
+    halo.addColorStop(0.55, 'rgba( 60,  20, 120, ' + (haloA * 0.4).toFixed(3) + ')');
+    halo.addColorStop(1.00, 'rgba(0, 0, 0, 0)');
     ctx.globalCompositeOperation = 'lighter';
     ctx.fillStyle = halo;
     ctx.fillRect(0, 0, W, H);
 
-    // Arc geometry — opens at the lower-right. Sweep drifts slowly so it
-    // never feels static even when audio is calm.
-    arcSweep += 0.0015 + bassAvg * 0.004;
-    const ARC_START = Math.PI * 0.85 + Math.sin(arcSweep) * 0.05;
-    const ARC_SPAN  = Math.PI * 1.7;
+    // Arc geometry — gap at the bottom, opens like a horseshoe.
+    arcSweep += 0.0010 + bassAvg * 0.0025;
+    const ARC_START = Math.PI * 0.72 + Math.sin(arcSweep) * 0.03;
+    const ARC_SPAN  = Math.PI * 1.56;
 
-    const numRays = 280;
+    const numRays = 260;
     const bins = freqData.length;
 
+    // Each ray is the same rainbow sprite — we just rotate it outward along
+    // the arc and modulate its length / opacity with the audio.
     for (let i = 0; i < numRays; i++) {
       const t = i / numRays;
+      // Slow horizontal drift so the colour ridges shimmer between frames
       const angle = ARC_START + t * ARC_SPAN;
 
-      // Map ray to an FFT bin — front-load so the bass end of the spectrum
-      // takes up the visually-dominant outer sweep.
-      const binIdx = Math.floor(Math.pow(t, 1.3) * bins * 0.45);
+      // Map ray to an FFT bin — log-ish so musical octaves spread evenly.
+      const binIdx = Math.floor(Math.pow(t, 1.25) * bins * 0.42);
       const v = freqData[binIdx] / 255;
 
-      // Ray length: per-bin energy + bass-driven base growth + kick punch
-      const energy = v * 0.7 + bassAvg * 0.2 + kickHit * 0.15;
-      const rayLen = baseR * (0.25 + energy * 0.95);
-      const innerR = baseR - rayLen * 0.35;
-      const outerR = baseR + rayLen * 0.85;
+      // Per-ray energy: own bin + sustained low end + kick punch
+      const energy = v * 0.65 + bassAvg * 0.18 + kickHit * 0.12 + 0.18;
+      // How tall the ray is, relative to min dim
+      const rayLen = minDim * (0.16 + energy * 0.42);
+      // How wide the ray is — slightly thicker on louder rays
+      const rayWidth = arcSpriteW * (0.7 + energy * 0.6);
 
-      const cosA = Math.cos(angle);
-      const sinA = Math.sin(angle);
-      const x1 = cx + cosA * innerR;
-      const y1 = cy + sinA * innerR;
-      const x2 = cx + cosA * outerR;
-      const y2 = cy + sinA * outerR;
+      const px = cx + Math.cos(angle) * baseR;
+      const py = cy + Math.sin(angle) * baseR;
 
-      // Hue cycles through full spectrum along the arc.
-      // A tiny rotation tied to phase keeps the colours alive.
-      const hue = ((t * 360) + phase * 18) % 360;
-
-      // Multi-pass chromatic bloom — three stacked strokes from wide+soft to
-      // thin+bright. This is what gives the prismatic, blooming feel.
-      for (let pass = 0; pass < 3; pass++) {
-        const passWidth = (5 - pass * 1.6) * dpr;
-        const passLight = 50 + pass * 14;
-        const passAlpha = (0.10 + energy * 0.45) * (pass === 0 ? 0.55 : (pass === 1 ? 0.85 : 1.0));
-        ctx.strokeStyle = 'hsla(' + hue.toFixed(1) + ', 100%, ' + passLight + '%, ' + passAlpha.toFixed(3) + ')';
-        ctx.lineWidth = passWidth;
-        ctx.lineCap = 'round';
-        ctx.beginPath();
-        ctx.moveTo(x1, y1);
-        ctx.lineTo(x2, y2);
-        ctx.stroke();
-      }
+      ctx.save();
+      ctx.translate(px, py);
+      // Rotate so the sprite's local +y points OUTWARD from the arc centre.
+      ctx.rotate(angle - Math.PI / 2);
+      // Bias: ~20% of the sprite extends inward (showing warm inner colours
+      // tinting the arc curve), ~80% extends outward (the visible plume).
+      ctx.globalAlpha = 0.35 + energy * 0.55;
+      ctx.drawImage(
+        arcSprite,
+        -rayWidth / 2,
+        -rayLen * 0.2,
+        rayWidth,
+        rayLen
+      );
+      ctx.restore();
     }
 
-    // Kick hit — bright inner ring flash
-    if (kickHit > 0.05) {
-      ctx.strokeStyle = 'rgba(255, 255, 255, ' + (kickHit * 0.35).toFixed(3) + ')';
-      ctx.lineWidth = (1 + kickHit * 2) * dpr;
-      ctx.beginPath();
-      ctx.arc(cx, cy, baseR * 0.55, ARC_START, ARC_START + ARC_SPAN);
-      ctx.stroke();
-    }
-
-    // Hat hit — radial sparkles around the outer edge
-    if (hatHit > 0.1) {
-      const n = Math.floor(8 + hatHit * 14);
-      for (let i = 0; i < n; i++) {
-        const a = ARC_START + Math.random() * ARC_SPAN;
-        const r = baseR * (1.05 + Math.random() * 0.6);
-        const sx = cx + Math.cos(a) * r;
-        const sy = cy + Math.sin(a) * r;
-        const hue = Math.random() * 360;
-        ctx.fillStyle = 'hsla(' + hue.toFixed(0) + ', 90%, 75%, ' + (hatHit * 0.6).toFixed(3) + ')';
-        ctx.fillRect(sx, sy, 2 * dpr, 2 * dpr);
-      }
-    }
+    // Outer bloom pass — re-draw a wider, more transparent halo on top so
+    // the brightest section blooms outward (light-leak feel).
+    ctx.globalAlpha = 1;
+    const bloom = ctx.createRadialGradient(cx, cy, baseR, cx, cy, baseR * 2.0);
+    const bloomA = 0.06 + (bassAvg + highAvg) * 0.10;
+    bloom.addColorStop(0.00, 'rgba(255, 200, 230, 0)');
+    bloom.addColorStop(0.45, 'rgba(255, 200, 230, ' + bloomA.toFixed(3) + ')');
+    bloom.addColorStop(1.00, 'rgba(255, 200, 230, 0)');
+    ctx.fillStyle = bloom;
+    ctx.fillRect(0, 0, W, H);
 
     ctx.globalCompositeOperation = 'source-over';
+    ctx.globalAlpha = 1;
+
+    // Subtle film grain — random white dots at very low opacity. Adds the
+    // analogue / photographic texture seen in the reference image.
+    const grainCount = Math.floor(W * H / (2200 * dpr * dpr));
+    for (let i = 0; i < grainCount; i++) {
+      const a = Math.random() * 0.05;
+      ctx.fillStyle = 'rgba(255, 255, 255, ' + a.toFixed(3) + ')';
+      ctx.fillRect(Math.random() * W, Math.random() * H, dpr, dpr);
+    }
   }
 
   // ---- event spawners ----
@@ -720,30 +752,37 @@
 
   function drawIdleHint(W, H, dpr) {
     if (mode === 2) {
-      // Mode 2 idle — slow chromatic arc preview
-      const cx = W * 0.5, cy = H * 0.42;
-      const baseR = Math.min(W, H) * 0.26;
+      if (!arcSprite || arcSpriteDpr !== dpr) buildArcSprite(dpr);
+      const minDim = Math.min(W, H);
+      const cx = W * 0.5, cy = H * 0.46;
+      const baseR = minDim * 0.22;
       const t0 = Date.now() * 0.0004;
-      const ARC_START = Math.PI * 0.85;
-      const ARC_SPAN  = Math.PI * 1.7;
+      const ARC_START = Math.PI * 0.72 + Math.sin(t0) * 0.03;
+      const ARC_SPAN  = Math.PI * 1.56;
       const numRays = 200;
+      ctx.globalCompositeOperation = 'lighter';
       for (let i = 0; i < numRays; i++) {
         const t = i / numRays;
         const angle = ARC_START + t * ARC_SPAN;
-        const rayLen = baseR * (0.28 + (Math.sin(t * Math.PI * 4 + t0) * 0.5 + 0.5) * 0.25);
-        const cosA = Math.cos(angle), sinA = Math.sin(angle);
-        const x1 = cx + cosA * (baseR - rayLen * 0.3);
-        const y1 = cy + sinA * (baseR - rayLen * 0.3);
-        const x2 = cx + cosA * (baseR + rayLen * 0.7);
-        const y2 = cy + sinA * (baseR + rayLen * 0.7);
-        const hue = ((t * 360) + t0 * 20) % 360;
-        ctx.strokeStyle = 'hsla(' + hue.toFixed(0) + ', 100%, 60%, 0.18)';
-        ctx.lineWidth = 2 * dpr;
-        ctx.lineCap = 'round';
-        ctx.beginPath();
-        ctx.moveTo(x1, y1);
-        ctx.lineTo(x2, y2);
-        ctx.stroke();
+        const energy = 0.32 + (Math.sin(t * Math.PI * 5 + t0 * 2) * 0.5 + 0.5) * 0.18;
+        const rayLen = minDim * (0.16 + energy * 0.32);
+        const rayWidth = arcSpriteW * 0.85;
+        const px = cx + Math.cos(angle) * baseR;
+        const py = cy + Math.sin(angle) * baseR;
+        ctx.save();
+        ctx.translate(px, py);
+        ctx.rotate(angle - Math.PI / 2);
+        ctx.globalAlpha = 0.35;
+        ctx.drawImage(arcSprite, -rayWidth / 2, -rayLen * 0.2, rayWidth, rayLen);
+        ctx.restore();
+      }
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.globalAlpha = 1;
+      // Light grain
+      const grainCount = Math.floor(W * H / (3000 * dpr * dpr));
+      for (let i = 0; i < grainCount; i++) {
+        ctx.fillStyle = 'rgba(255, 255, 255, ' + (Math.random() * 0.04).toFixed(3) + ')';
+        ctx.fillRect(Math.random() * W, Math.random() * H, dpr, dpr);
       }
       return;
     }
