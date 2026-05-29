@@ -116,6 +116,23 @@
     text-transform: uppercase;
   }
   .back-link:hover { color: var(--ink); }
+
+  /* Fullscreen: hide all UI chrome — visualizer only.
+     Both :fullscreen (native) and the .immersive class (manual toggle) hide chrome.
+     The .immersive class is also set when entering fullscreen so styles still
+     apply if a vendor prefix on :fullscreen is missing. */
+  :fullscreen .title,
+  :fullscreen .vertical,
+  :fullscreen .back-link,
+  :fullscreen .controls,
+  :fullscreen .status,
+  body.immersive .title,
+  body.immersive .vertical,
+  body.immersive .back-link,
+  body.immersive .controls,
+  body.immersive .status { display: none !important; }
+  :fullscreen, body.immersive { cursor: none; }
+
   @media (max-width: 560px) {
     .title { font-size: 9px; top: 14px; left: 16px; letter-spacing: 1.5px; }
     .vertical { font-size: 9px; top: 14px; right: 16px; }
@@ -135,7 +152,7 @@
 <div class="controls">
   <button id="start-tab" title="Listen to another browser tab (recommended)">🖥 Tab Audio</button>
   <button id="start-mic" title="Listen to microphone">🎤 Mic</button>
-  <button id="fullscreen" title="Toggle full screen">⛶</button>
+  <button id="fullscreen" title="Toggle full screen (ESC to exit)">⛶</button>
 </div>
 
 <script>
@@ -155,16 +172,30 @@
   let freqData = null;
   let running = false;
 
-  let phase = 0;          // global animation phase
-  let energyAvg = 0;      // smoothed audio energy
-  let bassAvg = 0;        // smoothed bass energy
-  let midAvg = 0;
-  let highAvg = 0;
+  // ----- audio analysis state -----
+  let phase = 0;
+  // Smoothed averages
+  let subAvg = 0, bassAvg = 0, lowMidAvg = 0, midAvg = 0, highAvg = 0, airAvg = 0;
+  // Fast-attack / slow-release envelopes for transient detection
+  let subPeak = 0, bassPeak = 0, midPeak = 0, highPeak = 0;
+  // Onset event "hits" — flash decays each frame
+  let kickHit = 0;          // sub-bass transient (kicks, low toms)
+  let bassHit = 0;          // bass / low-mid transient
+  let snareHit = 0;         // 200-2k transient (snare, clap, perc)
+  let hatHit = 0;           // high band transient (hats, ride, sparkle)
+  // Long-term energy used for dynamic range normalisation
+  let dynRef = 0.001;
 
-  // Reference palette — Musashino-poster magenta gradient.
-  // We'll use HSL space so we can move easily through the pink range.
-  const HUE_BASE = 320;   // pink
-  const HUE_RANGE = 30;   // sweep to magenta/violet
+  // Particle pool for hat sparks
+  const sparks = [];
+  // Ripple shockwaves on kick hits
+  const ripples = [];
+  // Snare flash bars
+  const flashes = [];
+
+  // ----- palette (Musashino-poster pink) -----
+  const HUE_BASE = 320;
+  const HUE_RANGE = 30;
 
   function resize() {
     const dpr = Math.max(1, window.devicePixelRatio || 1);
@@ -174,7 +205,6 @@
     canvas.height = h * dpr;
     canvas.style.width = w + 'px';
     canvas.style.height = h + 'px';
-    // Clear to bg on resize so we don't leave artifacts in negative gutter
     ctx.fillStyle = '#FDFCF4';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
   }
@@ -201,7 +231,7 @@
     source = audioCtx.createMediaStreamSource(stream);
     analyser = audioCtx.createAnalyser();
     analyser.fftSize = 2048;
-    analyser.smoothingTimeConstant = 0.78;
+    analyser.smoothingTimeConstant = 0.6;
     timeData = new Uint8Array(analyser.fftSize);
     freqData = new Uint8Array(analyser.frequencyBinCount);
     source.connect(analyser);
@@ -218,7 +248,6 @@
     }
     try {
       const s = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
-      // Drop video tracks — we only need audio
       s.getVideoTracks().forEach(t => { try { t.stop(); } catch (e) {} s.removeTrack(t); });
       if (s.getAudioTracks().length === 0) {
         setStatus('No audio in the shared tab. Make sure to tick "Share tab audio" in the picker.');
@@ -241,10 +270,44 @@
   }
   startTabBtn.addEventListener('click', startTab);
   startMicBtn.addEventListener('click', startMic);
+
+  // ---- fullscreen ----
+  function enterFullscreen() {
+    const el = document.documentElement;
+    const req = el.requestFullscreen || el.webkitRequestFullscreen || el.mozRequestFullScreen || el.msRequestFullscreen;
+    if (req) req.call(el).catch(() => {});
+  }
+  function exitFullscreen() {
+    const ex = document.exitFullscreen || document.webkitExitFullscreen || document.mozCancelFullScreen || document.msExitFullscreen;
+    if (ex) try { ex.call(document); } catch (e) {}
+  }
+  function isFullscreen() {
+    return !!(document.fullscreenElement || document.webkitFullscreenElement || document.mozFullScreenElement || document.msFullscreenElement);
+  }
   fullscreenBtn.addEventListener('click', () => {
-    if (document.fullscreenElement) document.exitFullscreen();
-    else document.documentElement.requestFullscreen().catch(() => {});
+    if (isFullscreen()) exitFullscreen();
+    else enterFullscreen();
   });
+  function onFullscreenChange() {
+    document.body.classList.toggle('immersive', isFullscreen());
+  }
+  document.addEventListener('fullscreenchange', onFullscreenChange);
+  document.addEventListener('webkitfullscreenchange', onFullscreenChange);
+  // ESC also exits via the browser default; this catches edge cases (e.g. when
+  // fullscreen was triggered programmatically and the browser swallowed the key).
+  window.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && isFullscreen()) exitFullscreen();
+    if (e.key === 'f' || e.key === 'F') {
+      if (isFullscreen()) exitFullscreen(); else enterFullscreen();
+    }
+  });
+
+  // ----- helpers for onset detection -----
+  function bandAvg(arr, startBin, endBin) {
+    let s = 0;
+    for (let i = startBin; i < endBin; i++) s += arr[i];
+    return s / Math.max(1, (endBin - startBin) * 255);
+  }
 
   // ----- main render loop -----
   function draw() {
@@ -254,8 +317,7 @@
     const W = canvas.width, H = canvas.height;
     const dpr = Math.max(1, window.devicePixelRatio || 1);
 
-    // Clear background (warm white). We *don't* fade — we want crisp linework
-    // and let the lines themselves do the temporal movement.
+    // Crisp clear (no fade) so the linework stays clean.
     ctx.fillStyle = '#FDFCF4';
     ctx.fillRect(0, 0, W, H);
 
@@ -267,98 +329,205 @@
     analyser.getByteFrequencyData(freqData);
     analyser.getByteTimeDomainData(timeData);
 
-    // Audio band averages — bass / mid / high
-    const binCount = freqData.length;
-    const bassEnd = Math.floor(binCount * 0.08);
-    const midEnd  = Math.floor(binCount * 0.35);
-    let b = 0, m = 0, h = 0, tot = 0;
-    for (let i = 0; i < binCount; i++) {
-      const v = freqData[i];
-      tot += v;
-      if (i < bassEnd) b += v;
-      else if (i < midEnd) m += v;
-      else h += v;
+    const bins = freqData.length;
+
+    // Approx frequency bands (assuming ~44.1 kHz, fftSize 2048 -> 1024 bins, ~21.5 Hz per bin):
+    //   sub:    0  – 5    (~0-100 Hz)        kicks, sub-bass
+    //   bass:   5  – 14   (~100-300 Hz)      bass body, low toms
+    //   lowMid: 14 – 46   (~300-1k Hz)       snare body, vox lows
+    //   mid:    46 – 140  (~1k-3k Hz)        snare snap, lead body
+    //   high:   140 – 280 (~3k-6k Hz)        hat body, presence
+    //   air:    280 – 460 (~6k-10k Hz)       hat shimmer, ride
+    const subEnd    = Math.min(bins, 5);
+    const bassEnd   = Math.min(bins, 14);
+    const lowMidEnd = Math.min(bins, 46);
+    const midEnd    = Math.min(bins, 140);
+    const highEnd   = Math.min(bins, 280);
+    const airEnd    = Math.min(bins, 460);
+
+    const subNow    = bandAvg(freqData, 0, subEnd);
+    const bassNow   = bandAvg(freqData, subEnd, bassEnd);
+    const lowMidNow = bandAvg(freqData, bassEnd, lowMidEnd);
+    const midNow    = bandAvg(freqData, lowMidEnd, midEnd);
+    const highNow   = bandAvg(freqData, midEnd, highEnd);
+    const airNow    = bandAvg(freqData, highEnd, airEnd);
+
+    // Slow smoothed averages (tonal energy)
+    subAvg    = subAvg    * 0.85 + subNow    * 0.15;
+    bassAvg   = bassAvg   * 0.85 + bassNow   * 0.15;
+    lowMidAvg = lowMidAvg * 0.85 + lowMidNow * 0.15;
+    midAvg    = midAvg    * 0.85 + midNow    * 0.15;
+    highAvg   = highAvg   * 0.85 + highNow   * 0.15;
+    airAvg    = airAvg    * 0.85 + airNow    * 0.15;
+
+    // Fast-attack / slow-release per-band envelopes — used for onset detection
+    function envUpdate(prev, now) {
+      return now > prev ? now : (prev * 0.92 + now * 0.08);
     }
-    const bassNow = b / (bassEnd * 255);
-    const midNow  = m / ((midEnd - bassEnd) * 255);
-    const highNow = h / ((binCount - midEnd) * 255);
-    const totalNow = tot / (binCount * 255);
-    bassAvg   = bassAvg * 0.85 + bassNow * 0.15;
-    midAvg    = midAvg  * 0.85 + midNow  * 0.15;
-    highAvg   = highAvg * 0.85 + highNow * 0.15;
-    energyAvg = energyAvg * 0.9 + totalNow * 0.1;
+    const newSubPeak  = envUpdate(subPeak,  subNow);
+    const newBassPeak = envUpdate(bassPeak, bassNow);
+    const newMidPeak  = envUpdate(midPeak,  midNow);
+    const newHighPeak = envUpdate(highPeak, (highNow + airNow) * 0.5);
 
-    // Phase advances faster on louder material
-    phase += 0.006 + energyAvg * 0.04;
+    // Onset detection: instantaneous value sharply above the smoothed floor.
+    const subDelta  = subNow  - subAvg;
+    const bassDelta = bassNow - bassAvg;
+    const midDelta  = lowMidNow - lowMidAvg;
+    const hatDelta  = (highNow + airNow) * 0.5 - (highAvg + airAvg) * 0.5;
 
-    // Resolution-aware line geometry
+    // Trigger thresholds — tuned for typical dub-techno mix levels
+    if (subDelta > 0.05 && subNow > 0.18 && kickHit < 0.4) kickHit = Math.min(1.4, subDelta * 6);
+    if (bassDelta > 0.05 && bassNow > 0.20 && bassHit < 0.4) bassHit = Math.min(1.2, bassDelta * 5);
+    if (midDelta > 0.04 && lowMidNow > 0.18 && snareHit < 0.4) snareHit = Math.min(1.0, midDelta * 6);
+    if (hatDelta > 0.025 && (highNow + airNow) * 0.5 > 0.10 && hatHit < 0.5) hatHit = Math.min(1.0, hatDelta * 8);
+
+    subPeak = newSubPeak; bassPeak = newBassPeak; midPeak = newMidPeak; highPeak = newHighPeak;
+
+    // Trigger visual events on the rising edges
+    if (kickHit > 0.5) spawnRipple(W, H, dpr, kickHit);
+    if (snareHit > 0.5) spawnFlash(W, H, dpr, snareHit);
+    if (hatHit > 0.3) spawnSparks(W, H, dpr, hatHit);
+
+    // Decay the hit envelopes
+    kickHit  *= 0.86;
+    bassHit  *= 0.88;
+    snareHit *= 0.85;
+    hatHit   *= 0.82;
+
+    // Total energy — drives global phase advance and dynamic colouration
+    const totalNow = (subNow + bassNow + lowMidNow + midNow + highNow + airNow) / 6;
+    dynRef = dynRef * 0.995 + totalNow * 0.005;
+    const norm = totalNow / Math.max(0.05, dynRef);
+
+    phase += 0.005 + totalNow * 0.04 + kickHit * 0.05;
+
+    // ----- background depth: bottom warmth tied to sustained sub/bass -----
+    const lowGrad = ctx.createLinearGradient(0, H * 0.55, 0, H);
+    const lowAlpha = 0.05 + (subAvg + bassAvg) * 0.45;
+    lowGrad.addColorStop(0, 'rgba(220, 60, 150, 0)');
+    lowGrad.addColorStop(1, 'rgba(180, 30, 120, ' + lowAlpha.toFixed(3) + ')');
+    ctx.fillStyle = lowGrad;
+    ctx.fillRect(0, 0, W, H);
+
+    // ----- kick pulse: dark vignette around screen on kick hits -----
+    if (kickHit > 0.05) {
+      const k = Math.min(1, kickHit);
+      const radial = ctx.createRadialGradient(W * 0.5, H * 0.5, W * 0.2, W * 0.5, H * 0.5, W * 0.7);
+      radial.addColorStop(0, 'rgba(200, 40, 130, 0)');
+      radial.addColorStop(1, 'rgba(140, 20, 100, ' + (0.18 * k).toFixed(3) + ')');
+      ctx.fillStyle = radial;
+      ctx.fillRect(0, 0, W, H);
+    }
+
+    // ----- vertical line field (the core spectral display) -----
     const lineSpacing = Math.max(1.2 * dpr, Math.min(2.4 * dpr, W / 600));
     const numLines = Math.floor(W / lineSpacing);
 
-    // Stationary background gradient — Musashino-style depth bottom-right
-    const bgGrad = ctx.createLinearGradient(0, 0, W, H);
-    bgGrad.addColorStop(0, 'rgba(253, 252, 244, 0)');
-    bgGrad.addColorStop(1, 'rgba(214, 51, 176, ' + (0.04 + bassAvg * 0.08).toFixed(3) + ')');
-    ctx.fillStyle = bgGrad;
-    ctx.fillRect(0, 0, W, H);
-
-    // Pre-compute warp amplitudes (subtle vertical curve on each line) from
-    // mid + high. Bass dominates colour intensity.
-    const warpAmp  = (midAvg * 0.6 + highAvg * 0.4) * 18 * dpr;
-    const colorAmp = bassAvg * 1.4 + midAvg * 0.6;
+    // Warp amplitude blends sustained mid-range with kick punch
+    const warpAmp = (midAvg * 0.5 + lowMidAvg * 0.3 + highAvg * 0.2) * 20 * dpr + kickHit * 14 * dpr;
+    // Vertical pulse from kick — lines briefly squash toward centre
+    const vSquash = kickHit * 0.07;
+    // Horizontal sway from bass — whole field tilts
+    const sway = Math.sin(phase * 0.7) * bassAvg * 8 * dpr;
 
     ctx.lineCap = 'butt';
 
     for (let i = 0; i < numLines; i++) {
-      const x = i * lineSpacing + lineSpacing * 0.5;
+      const x = i * lineSpacing + lineSpacing * 0.5 + sway;
       const t = i / numLines;
 
-      // Frequency mapping — log-ish so musical notes spread evenly across width
-      const binIdx = Math.floor(Math.pow(t, 1.6) * binCount * 0.55);
+      // Each line samples one frequency bin (log-ish — musical octaves spread)
+      const binIdx = Math.floor(Math.pow(t, 1.4) * bins * 0.55);
       const freqVal = freqData[binIdx] / 255;
 
-      // Two moving sine fields create the rippling vertical "ridges"
+      // Two travelling sine fields create the rippling "ridges"
       const ripple1 = Math.sin(t * Math.PI * 9 + phase) * 0.5 + 0.5;
       const ripple2 = Math.sin(t * Math.PI * 21 - phase * 1.3) * 0.5 + 0.5;
-      const ripple  = ripple1 * 0.6 + ripple2 * 0.4;
+      const ripple = ripple1 * 0.6 + ripple2 * 0.4;
 
-      // Combined intensity: ambient ripple + frequency response + low-end pulse
-      const ambient = 0.16 + ripple * 0.18;
-      const audioIntensity = freqVal * 0.55 + colorAmp * 0.25;
-      const intensity = Math.min(1, ambient + audioIntensity);
+      // Intensity layers: ambient + per-bin response + kick boost
+      const ambient = 0.14 + ripple * 0.18;
+      const audioIntensity = freqVal * 0.55 + bassAvg * 0.25;
+      const intensity = Math.min(1, ambient + audioIntensity + kickHit * 0.12);
 
-      // Pink hue with subtle horizontal drift — sweep across the spectrum
-      const hue = HUE_BASE + ripple * HUE_RANGE - 5;
-      const sat = 70 + intensity * 25;
-      const lit = 72 - intensity * 38;
+      // Hue drifts with ripple AND with which band has more energy
+      // (so a snare-heavy moment leans more magenta than a bass-heavy one)
+      const bandTilt = (midAvg - bassAvg) * 8;
+      const hue = HUE_BASE + ripple * HUE_RANGE - 5 + bandTilt;
+      const sat = 72 + intensity * 22;
+      const lit = 72 - intensity * 38 - kickHit * 6;
       const alpha = 0.22 + intensity * 0.7;
 
-      // Time-domain mapped vertical wave — give each line a subtle curve
-      const waveIdx = Math.floor((i / numLines) * timeData.length);
+      // Time-domain warp — each line picks up the instantaneous waveform
+      const waveIdx = Math.floor(t * timeData.length);
       const waveVal = (timeData[waveIdx] - 128) / 128;
 
       ctx.strokeStyle = 'hsla(' + hue.toFixed(1) + ',' + sat.toFixed(0) + '%,' + lit.toFixed(0) + '%,' + alpha.toFixed(3) + ')';
-      ctx.lineWidth = Math.max(0.6, lineSpacing * 0.55);
+      ctx.lineWidth = Math.max(0.6, lineSpacing * 0.55) + bassHit * 0.6;
 
       ctx.beginPath();
-      const segments = 14;
-      for (let s = 0; s <= segments; s++) {
-        const yNorm = s / segments;
-        const y = yNorm * H;
-        // Smooth horizontal wave displacement combining LFO and instantaneous waveform
+      const segments = 16;
+      const cy = H * 0.5;
+      for (let sg = 0; sg <= segments; sg++) {
+        const yNorm = sg / segments;
+        // Vertical squash bends Y toward centre on kick hits
+        const yWarp = yNorm + (yNorm - 0.5) * vSquash * Math.sin(yNorm * Math.PI);
+        const y = yWarp * H;
         const wave = Math.sin(yNorm * Math.PI * 2.2 + phase * 1.1 + i * 0.045) * waveVal * warpAmp;
         const xOffset = x + wave;
-        if (s === 0) ctx.moveTo(xOffset, y);
+        if (sg === 0) ctx.moveTo(xOffset, y);
         else ctx.lineTo(xOffset, y);
       }
       ctx.stroke();
     }
 
-    // Subtle highlight band — a soft moving glow inspired by the centre lift
-    // of the reference poster.
+    // ----- ripples (kick shockwaves) -----
+    ctx.globalCompositeOperation = 'lighter';
+    for (let i = ripples.length - 1; i >= 0; i--) {
+      const r = ripples[i];
+      r.life -= r.decay;
+      if (r.life <= 0) { ripples.splice(i, 1); continue; }
+      r.radius += r.speed;
+      const a = r.life * 0.4;
+      ctx.strokeStyle = 'hsla(330, 80%, 60%, ' + a.toFixed(3) + ')';
+      ctx.lineWidth = (4 + (1 - r.life) * 3) * dpr;
+      ctx.beginPath();
+      ctx.arc(r.x, r.y, r.radius, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+
+    // ----- snare flashes (horizontal moving bars) -----
+    for (let i = flashes.length - 1; i >= 0; i--) {
+      const f = flashes[i];
+      f.life -= 0.04;
+      if (f.life <= 0) { flashes.splice(i, 1); continue; }
+      const a = f.life * 0.45;
+      const grad = ctx.createLinearGradient(0, f.y, 0, f.y + f.h);
+      grad.addColorStop(0, 'rgba(255, 220, 240, 0)');
+      grad.addColorStop(0.5, 'rgba(255, 120, 200, ' + a.toFixed(3) + ')');
+      grad.addColorStop(1, 'rgba(255, 220, 240, 0)');
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, f.y, W, f.h);
+    }
+
+    // ----- hat sparks (tiny falling particles) -----
+    for (let i = sparks.length - 1; i >= 0; i--) {
+      const s = sparks[i];
+      s.life -= s.decay;
+      if (s.life <= 0) { sparks.splice(i, 1); continue; }
+      s.x += s.vx;
+      s.y += s.vy;
+      s.vy += 0.05 * dpr;
+      const a = Math.max(0, s.life);
+      ctx.fillStyle = 'hsla(' + s.hue.toFixed(0) + ', 90%, 75%, ' + a.toFixed(3) + ')';
+      ctx.fillRect(s.x, s.y, s.size, s.size);
+    }
+    ctx.globalCompositeOperation = 'source-over';
+
+    // ----- soft moving highlight band (reference-poster centre lift) -----
     const glowY = H * (0.55 + Math.sin(phase * 0.4) * 0.06);
     const glow = ctx.createRadialGradient(W * 0.45, glowY, 0, W * 0.45, glowY, W * 0.35);
-    glow.addColorStop(0, 'rgba(255, 240, 248, ' + (0.18 + highAvg * 0.18).toFixed(3) + ')');
+    glow.addColorStop(0, 'rgba(255, 240, 248, ' + (0.16 + airAvg * 0.22).toFixed(3) + ')');
     glow.addColorStop(1, 'rgba(255, 240, 248, 0)');
     ctx.globalCompositeOperation = 'lighter';
     ctx.fillStyle = glow;
@@ -366,9 +535,42 @@
     ctx.globalCompositeOperation = 'source-over';
   }
 
+  // ---- event spawners ----
+  function spawnRipple(W, H, dpr, strength) {
+    // One ripple per kick — centre-ish, expanding outward
+    ripples.push({
+      x: W * (0.35 + Math.random() * 0.3),
+      y: H * (0.45 + Math.random() * 0.2),
+      radius: 6 * dpr,
+      speed: (4 + strength * 6) * dpr,
+      life: 1,
+      decay: 0.025
+    });
+  }
+  function spawnFlash(W, H, dpr, strength) {
+    flashes.push({
+      y: H * (0.25 + Math.random() * 0.5),
+      h: (12 + strength * 30) * dpr,
+      life: 1
+    });
+  }
+  function spawnSparks(W, H, dpr, strength) {
+    const n = Math.floor(6 + strength * 14);
+    for (let i = 0; i < n; i++) {
+      sparks.push({
+        x: Math.random() * W,
+        y: H * (0.05 + Math.random() * 0.4),
+        vx: (Math.random() - 0.5) * 2 * dpr,
+        vy: (-0.5 + Math.random() * 1.5) * dpr,
+        size: (1.2 + Math.random() * 1.8) * dpr,
+        hue: 315 + Math.random() * 30,
+        life: 0.7 + Math.random() * 0.4,
+        decay: 0.015 + Math.random() * 0.015
+      });
+    }
+  }
+
   function drawIdleHint(W, H, dpr) {
-    // Soft idle pattern: very faint vertical lines so users see something
-    // before they connect a source.
     const lineSpacing = 3 * dpr;
     const numLines = Math.floor(W / lineSpacing);
     for (let i = 0; i < numLines; i++) {
@@ -384,7 +586,6 @@
     }
   }
 
-  // Pre-paint the idle pattern so the page isn't blank on load
   function idleTick() {
     if (running) return;
     const W = canvas.width, H = canvas.height;
