@@ -217,19 +217,34 @@
   body.mode-mixing .mic-control,
   body.mode-mixing .mixer,
   body.mode-mixing .add-row { display: none !important; }
-  /* Mix mode — vertical channel strips */
+  /* Mix mode — vertical channel strips. Master is pinned to the right of
+     the viewport via a grid + sticky column; every other channel stacks in
+     a wrapping flex grid on the left. */
   body.mode-mixing #tracks {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 16px;
+    align-items: start;
+  }
+  .mix-channels-left {
     display: flex;
     flex-direction: row;
     flex-wrap: wrap;
     gap: 10px;
     align-items: flex-start;
   }
+  .mix-channels-right {
+    position: sticky;
+    right: 0;
+    align-self: start;
+    padding-left: 12px;
+    border-left: 1px solid var(--line);
+  }
   body.mode-mixing .track {
     display: flex !important;
     flex-direction: column;
     align-items: center;
-    width: 96px;
+    width: 110px;
     border: 1px solid var(--line);
     border-radius: 4px;
     padding: 8px 6px;
@@ -371,6 +386,47 @@
     color: var(--accent);
     font-weight: 600;
     font-size: 11px;
+  }
+  /* Per-channel sends — visible only on regular channel strips in Mix mode */
+  .mix-sends-wrap { display: none; }
+  body.mode-mixing .track:not(.master-strip) .mix-sends-wrap {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    width: 100%;
+    margin-top: 6px;
+    padding: 6px 4px 4px;
+    border-top: 1px solid var(--line);
+  }
+  .mix-sends-title {
+    font-size: 8px;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+    text-align: center;
+    margin-bottom: 2px;
+  }
+  .mix-send-row {
+    display: grid;
+    grid-template-columns: 22px 1fr 24px;
+    align-items: center;
+    column-gap: 4px;
+    font-size: 8px;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+  }
+  .mix-send-row .send-label { text-align: left; }
+  .mix-send-row .send-val {
+    text-align: right;
+    color: var(--text);
+    font-variant-numeric: tabular-nums;
+  }
+  .mix-send-row input[type="range"] {
+    width: 100%;
+    height: 10px;
+    accent-color: var(--text);
+    margin: 0;
   }
 
   /* ----- Live mode: two-deck side-by-side live mixer ----- */
@@ -5406,6 +5462,36 @@
     strip.appendChild(mixFaderWrap);
     wrap.appendChild(strip);
 
+    // Per-channel send levels (Mix mode only — hidden by CSS otherwise)
+    const sendsWrap = el('div', 'mix-sends-wrap');
+    sendsWrap.appendChild(el('div', 'mix-sends-title', 'SENDS'));
+    const SENDS = [
+      ['DLY', 'delaySend',    'delaySendN'],
+      ['RVB', 'reverbSend',   'reverbSendN'],
+      ['CHO', 'chorusSend',   'chorusSendN'],
+      ['FLA', 'flangerSend',  'flangerSendN'],
+      ['BIT', 'bitcrushSend', 'bitcrushSendN']
+    ];
+    SENDS.forEach(([label, prop, nodeProp]) => {
+      const row = el('div', 'mix-send-row');
+      row.appendChild(el('span', 'send-label', label));
+      const r = el('input'); r.type = 'range'; r.min = 0; r.max = 1; r.step = 0.01;
+      r.value = track[prop] || 0;
+      const valEl = el('span', 'send-val', Number(track[prop] || 0).toFixed(2));
+      r.addEventListener('input', () => {
+        const v = parseFloat(r.value);
+        track[prop] = v;
+        valEl.textContent = v.toFixed(2);
+        if (track[nodeProp] && audioCtx) {
+          track[nodeProp].gain.setTargetAtTime(v, audioCtx.currentTime, 0.02);
+        }
+      });
+      row.appendChild(r);
+      row.appendChild(valEl);
+      sendsWrap.appendChild(row);
+    });
+    wrap.appendChild(sendsWrap);
+
     tracksEl.appendChild(wrap);
     if (track.kind !== 'mic') rebuildSteps(track);
   }
@@ -7050,13 +7136,39 @@
       if (tracks.length === 0) { updateLiveDeckLabels(); return; }
       tracks.forEach(t => {
         buildTrack(t);
-        // buildTrack appended the wrap to tracksEl; move it into its deck.
         const wrap = tracksEl.lastElementChild;
         if (!wrap || wrap === deckAEl || wrap === deckBEl) return;
         const target = t.deck === 'B' ? deckBEl : deckAEl;
         target.appendChild(wrap);
       });
       updateLiveDeckLabels();
+      return;
+    }
+
+    if (currentMode === 'mixing') {
+      // Mix layout: channels in a flex-wrap left zone, master pinned to the
+      // right via a sticky column. Keeps the master strip visible while
+      // scrolling through many channels.
+      const leftEl = el('div', 'mix-channels-left');
+      const rightEl = el('div', 'mix-channels-right');
+      tracksEl.appendChild(leftEl);
+      tracksEl.appendChild(rightEl);
+      if (tracks.length === 0) {
+        leftEl.appendChild(el('div', 'empty-hint',
+          'No tracks yet — use the "Add track" buttons above to add a Drum, Bass, Synth, Chord, Mic, or Granular channel.'));
+        return;
+      }
+      tracks.forEach(t => {
+        buildTrack(t);
+        const wrap = tracksEl.lastElementChild;
+        if (!wrap || wrap === leftEl || wrap === rightEl) return;
+        leftEl.appendChild(wrap);
+      });
+      buildMasterStrip();
+      const masterWrap = tracksEl.lastElementChild;
+      if (masterWrap && masterWrap !== leftEl && masterWrap !== rightEl) {
+        rightEl.appendChild(masterWrap);
+      }
       return;
     }
 
@@ -7636,9 +7748,10 @@
       alert('That file does not look like a substrata project.');
       return;
     }
-    // Remove existing tracks for this deck
+    // Remove existing tracks on this deck AND any non-deck tracks (left over
+    // from the Track-mode workflow) — keep the OTHER deck intact.
     for (let i = tracks.length - 1; i >= 0; i--) {
-      if (tracks[i].deck === deck) {
+      if (tracks[i].deck === deck || !tracks[i].deck) {
         destroyTrackAudio(tracks[i]);
         tracks.splice(i, 1);
       }
@@ -7905,9 +8018,11 @@
       document.body.classList.toggle('mode-effects', mode === 'effects');
       document.body.classList.toggle('mode-live',    mode === 'live');
       modeBtns.forEach(b => b.classList.toggle('on', b === btn));
-      // Live mode uses a different DOM layout (per-deck containers) — rebuild
-      // when crossing the boundary so the structure matches.
-      if (mode === 'live' || oldMode === 'live') rebuildTracksUI();
+      // Live and Mix modes use different DOM layouts (per-deck containers
+      // for Live, left+right zones for Mix) — rebuild whenever we cross
+      // a mode boundary that changes structure.
+      const structural = m => m === 'live' || m === 'mixing';
+      if (structural(mode) || structural(oldMode)) rebuildTracksUI();
     });
   });
 
