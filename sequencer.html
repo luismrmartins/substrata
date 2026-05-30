@@ -218,21 +218,51 @@
   body.mode-mixing .mixer,
   body.mode-mixing .add-row { display: none !important; }
 
-  /* ---- Track mode (recording): instruments left | sequencer + details
-     right. The selected instrument drives what shows on the right. */
+  /* ---- Track mode (recording): instruments left | sequencer right.
+     Quick channel controls sit above the sequencer; deep Instrument /
+     Channel tweaks live in a bottom-pinned full-width panel. */
+  body.mode-recording {
+    /* Leave room for the fixed bottom controls so nothing hides under them */
+    padding-bottom: 320px;
+  }
   body.mode-recording #tracks {
     display: grid;
     grid-template-columns: 240px minmax(0, 1fr);
-    grid-template-rows: auto 1fr;
-    grid-template-areas:
-      "instruments sequencer"
-      "instruments details";
     gap: 16px;
     align-items: start;
   }
-  .panel-instruments { grid-area: instruments; display: flex; flex-direction: column; gap: 4px; }
-  .panel-sequencer   { grid-area: sequencer; min-width: 0; }
-  .panel-details     { grid-area: details; min-width: 0; display: flex; flex-direction: column; gap: 10px; }
+  .panel-instruments { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+  .panel-sequencer   { min-width: 0; }
+  .panel-seq-header {
+    padding-bottom: 10px;
+    margin-bottom: 12px;
+    border-bottom: 1px solid var(--line);
+  }
+  .panel-seq-header .group { border-left: none; padding-left: 0; }
+  /* Bottom-pinned, full-width details panel */
+  .panel-details {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    background: var(--bg);
+    border-top: 1px solid var(--line);
+    padding: 14px 24px;
+    z-index: 5;
+    max-height: 40vh;
+    overflow-y: auto;
+  }
+  .panel-details .track-knobs {
+    display: flex;
+    flex-direction: row;
+    align-items: flex-start;
+    flex-wrap: wrap;
+    justify-content: flex-start;
+    gap: 0;
+    margin: 0;
+    padding: 0;
+    border-top: none;
+  }
   .panel-empty {
     font-size: 11px;
     color: var(--muted);
@@ -275,11 +305,16 @@
   .instrument-item .toggle { width: 22px; height: 22px; font-size: 9px; }
   .panel-sequencer .steps-row,
   .panel-sequencer .mic-control { margin: 0; }
+  /* Sections inside the bottom details panel — no boxes, just vertical
+     dividers, content left-aligned. */
   .knobs-section {
-    padding: 12px;
-    border: 1px solid var(--line);
-    border-radius: 3px;
+    padding: 0 24px;
+    border: none;
+    flex: 0 1 auto;
+    min-width: 0;
   }
+  .knobs-section:first-child { padding-left: 0; }
+  .knobs-section + .knobs-section { border-left: 1px solid var(--line); }
   .knobs-section-title {
     font-size: 10px;
     text-transform: uppercase;
@@ -288,18 +323,6 @@
     margin-bottom: 10px;
     font-weight: 600;
   }
-  /* In the new Track-mode layout .track-knobs is moved out of the .track
-     wrap into .panel-details, so the default `.track.expanded .track-knobs`
-     rule never matches. Force it visible here, and lay it out as a column
-     of knobs-section blocks. */
-  .panel-details .track-knobs {
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-    margin: 0;
-    padding: 0;
-    border-top: none;
-  }
   .knobs-section .knobs-row {
     display: flex;
     flex-wrap: wrap;
@@ -307,13 +330,16 @@
     gap: 14px;
   }
   @media (max-width: 900px) {
-    body.mode-recording #tracks {
-      grid-template-columns: 1fr;
-      grid-template-areas:
-        "instruments"
-        "sequencer"
-        "details";
+    body.mode-recording #tracks { grid-template-columns: 1fr; }
+    body.mode-recording { padding-bottom: 420px; }
+    .knobs-section + .knobs-section {
+      border-left: none;
+      border-top: 1px solid var(--line);
+      padding-left: 0;
+      padding-top: 12px;
+      margin-top: 12px;
     }
+    .knobs-section { padding: 0; }
   }
 
   /* Mix mode — vertical channel strips. Master is pinned to the right of
@@ -9005,19 +9031,19 @@
       const sec = makeSection('Mic input', children);
       k.innerHTML = '';
       k.appendChild(sec);
-    } else if (children.length < 4) {
-      // Unexpected shape — wrap everything in a single Channel section.
+    } else if (children.length < 3) {
+      // Unexpected shape — single section.
       const sec = makeSection('Channel', children);
       k.innerHTML = '';
       k.appendChild(sec);
     } else {
-      // Normal shape produced by buildKnobs: std controls first, then
-      // preset + voice-specific groups, then Send / Duck / Trk LFO.
-      const std    = children[0];
+      // Std controls were already lifted into the sequencer header, so what
+      // remains is [preset?, voice-specific groups…, Send, Duck, Trk LFO].
+      // Last three groups are Channel; everything before them is Instrument.
       const tail   = children.slice(-3);
-      const middle = children.slice(1, -3);
+      const middle = children.slice(0, -3);
       const insSec = makeSection('Instrument', middle);
-      const chSec  = makeSection('Channel',    [std, ...tail]);
+      const chSec  = makeSection('Channel',    tail);
       k.innerHTML = '';
       k.appendChild(insSec);
       k.appendChild(chSec);
@@ -9074,9 +9100,18 @@
           }
         });
 
-        // For the selected track only, move the sequencer + knobs into their
-        // panels and partition the knobs into Instrument / Channel sections.
+        // For the selected track only, move the sequencer + knobs into
+        // their panels. The first child of knobs is the std controls
+        // group (Stp / Vol / Swg / Mono [/ NLen]) — it lives in a header
+        // ABOVE the step grid, and the rest of the knobs are partitioned
+        // into Instrument / Channel sections in the bottom panel.
         if (t.id === selectedTrackId) {
+          if (knobs && t.kind !== 'mic' && knobs.firstElementChild) {
+            const std = knobs.firstElementChild;
+            const header = el('div', 'panel-seq-header');
+            header.appendChild(std);
+            seqPanel.appendChild(header);
+          }
           if (steps) seqPanel.appendChild(steps);
           if (mic)   seqPanel.appendChild(mic);
           if (knobs) {
