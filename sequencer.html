@@ -329,6 +329,25 @@
     color: #fff;
     border-color: var(--accent);
   }
+  /* Sequence-edit actions sit between the bank selector and the preview
+     button. Visually similar to the bank-selector buttons. */
+  .seq-actions {
+    display: flex;
+    gap: 4px;
+  }
+  .seq-action-btn {
+    background: transparent;
+    border: 1px solid var(--cell-border);
+    color: var(--text);
+    font: inherit;
+    font-size: 11px;
+    width: 26px;
+    height: 22px;
+    padding: 0;
+    cursor: pointer;
+    text-align: center;
+  }
+  .seq-action-btn:hover { border-color: var(--accent); color: var(--accent); }
   /* Preview button (Track tab, right of the bank selector) */
   .panel-track-name-row .pattern-preview {
     margin-left: auto;
@@ -428,6 +447,10 @@
     gap: 3px;
   }
   .instrument-item .toggle { width: 22px; height: 22px; font-size: 9px; }
+  /* R + nudge buttons live on the sequencer header in Track mode, not in
+     the per-instrument toggle row. */
+  body.mode-recording .instrument-item .toggle.rnd,
+  body.mode-recording .instrument-item .toggle.nudge { display: none !important; }
   /* Add-instrument button + popout menu at the bottom of the instruments
      column (replaces the old top-row + Drum / + Bass / … strip). */
   .add-instrument-wrap {
@@ -768,14 +791,31 @@
     grid-column: 2;
     align-self: center;
   }
+  /* Segmented meter — fixed number of small cells stacked bottom-up.
+     Each segment has a faint colour matching its position on the
+     green→yellow→red scale, so the user sees the scale even when no
+     signal is playing. Lit segments use the full colour. */
   .mix-meter {
-    width: 8px;
+    width: 10px;
     height: 180px;
-    background: var(--line);
+    background: transparent;
+    border: 1px solid var(--line);
     border-radius: 2px;
-    position: relative;
+    padding: 1px;
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: column-reverse;
+    gap: 1px;
     overflow: hidden;
   }
+  .mix-meter-seg {
+    flex: 1;
+    min-height: 2px;
+    background: var(--seg-off);
+    border-radius: 1px;
+    transition: background 50ms linear;
+  }
+  .mix-meter-seg.lit { background: var(--seg-on); }
   .mix-meter-fill {
     position: absolute;
     bottom: 0;
@@ -7896,11 +7936,9 @@
 
     // Channel strip: meter + vertical fader (Mix mode only)
     const strip = el('div', 'mix-strip');
-    const meter = el('div', 'mix-meter');
-    const meterFill = el('div', 'mix-meter-fill');
-    meter.appendChild(meterFill);
-    track._meterFill = meterFill;
-    strip.appendChild(meter);
+    const meterRes = buildSegmentedMeter(14);
+    track._meterSegs = meterRes.segs;
+    strip.appendChild(meterRes.meter);
 
     const mixFaderWrap = el('div', 'mix-fader-wrap');
     const mixFader = el('input', 'mix-fader');
@@ -8312,17 +8350,15 @@
         knob('Res',  0.1, 25,   0.1, track.reso,   v => track.reso   = v, v => v.toFixed(1)),
         knob('Env',  -1, 1,    0.01, track.fEnvAmt, v => track.fEnvAmt = v, v => (v >= 0 ? '+' : '') + v.toFixed(2)),
       ));
-      k.appendChild(group('F-Env',
-        knob('A', 0.001, 1.0, 0.001, track.fAttack,  v => track.fAttack  = v, v => v.toFixed(3)),
-        knob('D', 0.01,  2.0, 0.01,  track.fDecay,   v => track.fDecay   = v, v => v.toFixed(2)),
-        knob('S', 0,     1,   0.01,  track.fSustain, v => track.fSustain = v, v => v.toFixed(2)),
-        knob('R', 0.01,  2.5, 0.01,  track.fRelease, v => track.fRelease = v, v => v.toFixed(2)),
-      ));
-      k.appendChild(group('A-Env',
-        knob('A', 0.001, 1.0, 0.001, track.attack,  v => track.attack  = v, v => v.toFixed(3)),
-        knob('D', 0.01,  2.0, 0.01,  track.decay,   v => track.decay   = v, v => v.toFixed(2)),
-        knob('S', 0,     1,   0.01,  track.sustain, v => track.sustain = v, v => v.toFixed(2)),
-        knob('R', 0.01,  2.5, 0.01,  track.release, v => track.release = v, v => v.toFixed(2)),
+      k.appendChild(group('Envs',
+        knob('fA', 0.001, 1.0, 0.001, track.fAttack,  v => track.fAttack  = v, v => v.toFixed(3)),
+        knob('fD', 0.01,  2.0, 0.01,  track.fDecay,   v => track.fDecay   = v, v => v.toFixed(2)),
+        knob('fS', 0,     1,   0.01,  track.fSustain, v => track.fSustain = v, v => v.toFixed(2)),
+        knob('fR', 0.01,  2.5, 0.01,  track.fRelease, v => track.fRelease = v, v => v.toFixed(2)),
+        knob('aA', 0.001, 1.0, 0.001, track.attack,  v => track.attack  = v, v => v.toFixed(3)),
+        knob('aD', 0.01,  2.0, 0.01,  track.decay,   v => track.decay   = v, v => v.toFixed(2)),
+        knob('aS', 0,     1,   0.01,  track.sustain, v => track.sustain = v, v => v.toFixed(2)),
+        knob('aR', 0.01,  2.5, 0.01,  track.release, v => track.release = v, v => v.toFixed(2)),
       ));
       k.appendChild(group('LFO',
         knob('Rate', 0.05, 30, 0.05, track.lfoRate, v => track.lfoRate = v, v => v.toFixed(2)),
@@ -8348,17 +8384,15 @@
         knob('Res',  0.1, 25,   0.1, track.reso,   v => track.reso   = v, v => v.toFixed(1)),
         knob('Env',  -1, 1,    0.01, track.fEnvAmt, v => track.fEnvAmt = v, v => (v >= 0 ? '+' : '') + v.toFixed(2)),
       ));
-      k.appendChild(group('F-Env',
-        knob('A', 0.001, 1.0, 0.001, track.fAttack,  v => track.fAttack  = v, v => v.toFixed(3)),
-        knob('D', 0.01,  2.0, 0.01,  track.fDecay,   v => track.fDecay   = v, v => v.toFixed(2)),
-        knob('S', 0,     1,   0.01,  track.fSustain, v => track.fSustain = v, v => v.toFixed(2)),
-        knob('R', 0.01,  2.5, 0.01,  track.fRelease, v => track.fRelease = v, v => v.toFixed(2)),
-      ));
-      k.appendChild(group('A-Env',
-        knob('A', 0.001, 1.0, 0.001, track.attack,  v => track.attack  = v, v => v.toFixed(3)),
-        knob('D', 0.01,  2.0, 0.01,  track.decay,   v => track.decay   = v, v => v.toFixed(2)),
-        knob('S', 0,     1,   0.01,  track.sustain, v => track.sustain = v, v => v.toFixed(2)),
-        knob('R', 0.01,  2.5, 0.01,  track.release, v => track.release = v, v => v.toFixed(2)),
+      k.appendChild(group('Envs',
+        knob('fA', 0.001, 1.0, 0.001, track.fAttack,  v => track.fAttack  = v, v => v.toFixed(3)),
+        knob('fD', 0.01,  2.0, 0.01,  track.fDecay,   v => track.fDecay   = v, v => v.toFixed(2)),
+        knob('fS', 0,     1,   0.01,  track.fSustain, v => track.fSustain = v, v => v.toFixed(2)),
+        knob('fR', 0.01,  2.5, 0.01,  track.fRelease, v => track.fRelease = v, v => v.toFixed(2)),
+        knob('aA', 0.001, 1.0, 0.001, track.attack,  v => track.attack  = v, v => v.toFixed(3)),
+        knob('aD', 0.01,  2.0, 0.01,  track.decay,   v => track.decay   = v, v => v.toFixed(2)),
+        knob('aS', 0,     1,   0.01,  track.sustain, v => track.sustain = v, v => v.toFixed(2)),
+        knob('aR', 0.01,  2.5, 0.01,  track.release, v => track.release = v, v => v.toFixed(2)),
       ));
       k.appendChild(group('LFO',
         knob('Rate', 0.05, 30, 0.05, track.lfoRate, v => track.lfoRate = v, v => v.toFixed(2)),
@@ -8394,17 +8428,15 @@
         knob('Res',  0.1, 18,   0.1, track.reso,   v => track.reso   = v, v => v.toFixed(1)),
         knob('Env',  -1, 1,    0.01, track.fEnvAmt, v => track.fEnvAmt = v, v => (v >= 0 ? '+' : '') + v.toFixed(2)),
       ));
-      k.appendChild(group('F-Env',
-        knob('A', 0.001, 2.0, 0.001, track.fAttack,  v => track.fAttack  = v, v => v.toFixed(3)),
-        knob('D', 0.01,  3.0, 0.01,  track.fDecay,   v => track.fDecay   = v, v => v.toFixed(2)),
-        knob('S', 0,     1,   0.01,  track.fSustain, v => track.fSustain = v, v => v.toFixed(2)),
-        knob('R', 0.01,  4.0, 0.01,  track.fRelease, v => track.fRelease = v, v => v.toFixed(2)),
-      ));
-      k.appendChild(group('A-Env',
-        knob('A', 0.001, 2.0, 0.001, track.attack,  v => track.attack  = v, v => v.toFixed(3)),
-        knob('D', 0.01,  3.0, 0.01,  track.decay,   v => track.decay   = v, v => v.toFixed(2)),
-        knob('S', 0,     1,   0.01,  track.sustain, v => track.sustain = v, v => v.toFixed(2)),
-        knob('R', 0.01,  4.0, 0.01,  track.release, v => track.release = v, v => v.toFixed(2)),
+      k.appendChild(group('Envs',
+        knob('fA', 0.001, 2.0, 0.001, track.fAttack,  v => track.fAttack  = v, v => v.toFixed(3)),
+        knob('fD', 0.01,  3.0, 0.01,  track.fDecay,   v => track.fDecay   = v, v => v.toFixed(2)),
+        knob('fS', 0,     1,   0.01,  track.fSustain, v => track.fSustain = v, v => v.toFixed(2)),
+        knob('fR', 0.01,  4.0, 0.01,  track.fRelease, v => track.fRelease = v, v => v.toFixed(2)),
+        knob('aA', 0.001, 2.0, 0.001, track.attack,  v => track.attack  = v, v => v.toFixed(3)),
+        knob('aD', 0.01,  3.0, 0.01,  track.decay,   v => track.decay   = v, v => v.toFixed(2)),
+        knob('aS', 0,     1,   0.01,  track.sustain, v => track.sustain = v, v => v.toFixed(2)),
+        knob('aR', 0.01,  4.0, 0.01,  track.release, v => track.release = v, v => v.toFixed(2)),
       ));
       k.appendChild(group('LFO',
         knob('Rate', 0.05, 12, 0.05, track.lfoRate, v => track.lfoRate = v, v => v.toFixed(2)),
@@ -8446,26 +8478,22 @@
         knob('Det',  -50, 50, 1, track.detuneB, v => track.detuneB = v, v => (v >= 0 ? '+' : '') + v),
         knob('PW',   0.05, 0.95, 0.01, track.pwB, v => track.pwB = v, v => v.toFixed(2)),
       ));
-      k.appendChild(group('Mix',
+      k.appendChild(group('Mix+Filter',
         knob('A/B', 0, 1, 0.01, track.mix, v => track.mix = v, v => v.toFixed(2)),
         knob('Nse', 0, 1, 0.01, track.noise, v => track.noise = v, v => v.toFixed(2)),
-      ));
-      k.appendChild(group('Filter',
         knob('Cut', 80, 12000, 10, track.cutoff, v => track.cutoff = v, v => Math.round(v)),
         knob('Res', 0.1, 18, 0.1, track.reso, v => track.reso = v, v => v.toFixed(1)),
         knob('Env', -1, 1, 0.01, track.fEnvAmt, v => track.fEnvAmt = v, v => v.toFixed(2)),
       ));
-      k.appendChild(group('F-Env',
-        knob('A', 0.001, 1, 0.001, track.fAttack,  v => track.fAttack  = v, v => v.toFixed(3)),
-        knob('D', 0.01,  2,   0.01, track.fDecay,   v => track.fDecay   = v, v => v.toFixed(2)),
-        knob('S', 0,     1,   0.01, track.fSustain, v => track.fSustain = v, v => v.toFixed(2)),
-        knob('R', 0.01,  3,   0.01, track.fRelease, v => track.fRelease = v, v => v.toFixed(2)),
-      ));
-      k.appendChild(group('A-Env',
-        knob('A', 0.001, 1, 0.001, track.attack,  v => track.attack  = v, v => v.toFixed(3)),
-        knob('D', 0.01,  2,   0.01, track.decay,   v => track.decay   = v, v => v.toFixed(2)),
-        knob('S', 0,     1,   0.01, track.sustain, v => track.sustain = v, v => v.toFixed(2)),
-        knob('R', 0.01,  3,   0.01, track.release, v => track.release = v, v => v.toFixed(2)),
+      k.appendChild(group('Envs',
+        knob('fA', 0.001, 1, 0.001, track.fAttack,  v => track.fAttack  = v, v => v.toFixed(3)),
+        knob('fD', 0.01,  2,   0.01, track.fDecay,   v => track.fDecay   = v, v => v.toFixed(2)),
+        knob('fS', 0,     1,   0.01, track.fSustain, v => track.fSustain = v, v => v.toFixed(2)),
+        knob('fR', 0.01,  3,   0.01, track.fRelease, v => track.fRelease = v, v => v.toFixed(2)),
+        knob('aA', 0.001, 1, 0.001, track.attack,  v => track.attack  = v, v => v.toFixed(3)),
+        knob('aD', 0.01,  2,   0.01, track.decay,   v => track.decay   = v, v => v.toFixed(2)),
+        knob('aS', 0,     1,   0.01, track.sustain, v => track.sustain = v, v => v.toFixed(2)),
+        knob('aR', 0.01,  3,   0.01, track.release, v => track.release = v, v => v.toFixed(2)),
       ));
       k.appendChild(group('LFO',
         knob('Rate', 0.05, 30, 0.05, track.lfoRate, v => track.lfoRate = v, v => v.toFixed(2)),
@@ -8499,26 +8527,22 @@
         knob('Det', -50, 50, 1, track.detuneB, v => track.detuneB = v, v => (v >= 0 ? '+' : '') + v),
         knob('PW',  0.05, 0.95, 0.01, track.pwB, v => track.pwB = v, v => v.toFixed(2)),
       ));
-      k.appendChild(group('Mix',
+      k.appendChild(group('Mix+Filter',
         knob('A/B', 0, 1, 0.01, track.mix, v => track.mix = v, v => v.toFixed(2)),
         knob('Nse', 0, 1, 0.01, track.noise, v => track.noise = v, v => v.toFixed(2)),
-      ));
-      k.appendChild(group('Filter',
         knob('Cut', 80, 12000, 10, track.cutoff, v => track.cutoff = v, v => Math.round(v)),
         knob('Res', 0.1, 18, 0.1, track.reso, v => track.reso = v, v => v.toFixed(1)),
         knob('Env', -1, 1, 0.01, track.fEnvAmt, v => track.fEnvAmt = v, v => v.toFixed(2)),
       ));
-      k.appendChild(group('F-Env',
-        knob('A', 0.001, 3, 0.001, track.fAttack,  v => track.fAttack  = v, v => v.toFixed(3)),
-        knob('D', 0.01,  3, 0.01,  track.fDecay,   v => track.fDecay   = v, v => v.toFixed(2)),
-        knob('S', 0,     1, 0.01,  track.fSustain, v => track.fSustain = v, v => v.toFixed(2)),
-        knob('R', 0.01,  5, 0.01,  track.fRelease, v => track.fRelease = v, v => v.toFixed(2)),
-      ));
-      k.appendChild(group('A-Env',
-        knob('A', 0.001, 4, 0.001, track.attack,  v => track.attack  = v, v => v.toFixed(3)),
-        knob('D', 0.01,  3, 0.01,  track.decay,   v => track.decay   = v, v => v.toFixed(2)),
-        knob('S', 0,     1, 0.01,  track.sustain, v => track.sustain = v, v => v.toFixed(2)),
-        knob('R', 0.01,  6, 0.01,  track.release, v => track.release = v, v => v.toFixed(2)),
+      k.appendChild(group('Envs',
+        knob('fA', 0.001, 3, 0.001, track.fAttack,  v => track.fAttack  = v, v => v.toFixed(3)),
+        knob('fD', 0.01,  3, 0.01,  track.fDecay,   v => track.fDecay   = v, v => v.toFixed(2)),
+        knob('fS', 0,     1, 0.01,  track.fSustain, v => track.fSustain = v, v => v.toFixed(2)),
+        knob('fR', 0.01,  5, 0.01,  track.fRelease, v => track.fRelease = v, v => v.toFixed(2)),
+        knob('aA', 0.001, 4, 0.001, track.attack,  v => track.attack  = v, v => v.toFixed(3)),
+        knob('aD', 0.01,  3, 0.01,  track.decay,   v => track.decay   = v, v => v.toFixed(2)),
+        knob('aS', 0,     1, 0.01,  track.sustain, v => track.sustain = v, v => v.toFixed(2)),
+        knob('aR', 0.01,  6, 0.01,  track.release, v => track.release = v, v => v.toFixed(2)),
       ));
       k.appendChild(group('LFO',
         knob('Rate', 0.05, 30, 0.05, track.lfoRate, v => track.lfoRate = v, v => v.toFixed(2)),
@@ -8550,26 +8574,22 @@
         knob('Det', -50, 50, 1, track.detuneB, v => track.detuneB = v, v => (v >= 0 ? '+' : '') + v),
         knob('PW',  0.05, 0.95, 0.01, track.pwB, v => track.pwB = v, v => v.toFixed(2)),
       ));
-      k.appendChild(group('Mix',
+      k.appendChild(group('Mix+Filter',
         knob('A/B', 0, 1, 0.01, track.mix, v => track.mix = v, v => v.toFixed(2)),
         knob('Nse', 0, 1, 0.01, track.noise, v => track.noise = v, v => v.toFixed(2)),
-      ));
-      k.appendChild(group('Filter',
         knob('Cut', 80, 12000, 10, track.cutoff, v => track.cutoff = v, v => Math.round(v)),
         knob('Res', 0.1, 18, 0.1, track.reso, v => track.reso = v, v => v.toFixed(1)),
         knob('Env', -1, 1, 0.01, track.fEnvAmt, v => track.fEnvAmt = v, v => v.toFixed(2)),
       ));
-      k.appendChild(group('F-Env',
-        knob('A', 0.001, 1, 0.001, track.fAttack,  v => track.fAttack  = v, v => v.toFixed(3)),
-        knob('D', 0.01,  2,   0.01, track.fDecay,   v => track.fDecay   = v, v => v.toFixed(2)),
-        knob('S', 0,     1,   0.01, track.fSustain, v => track.fSustain = v, v => v.toFixed(2)),
-        knob('R', 0.01,  3,   0.01, track.fRelease, v => track.fRelease = v, v => v.toFixed(2)),
-      ));
-      k.appendChild(group('A-Env',
-        knob('A', 0.001, 1, 0.001, track.attack,  v => track.attack  = v, v => v.toFixed(3)),
-        knob('D', 0.01,  2,   0.01, track.decay,   v => track.decay   = v, v => v.toFixed(2)),
-        knob('S', 0,     1,   0.01, track.sustain, v => track.sustain = v, v => v.toFixed(2)),
-        knob('R', 0.01,  3,   0.01, track.release, v => track.release = v, v => v.toFixed(2)),
+      k.appendChild(group('Envs',
+        knob('fA', 0.001, 1, 0.001, track.fAttack,  v => track.fAttack  = v, v => v.toFixed(3)),
+        knob('fD', 0.01,  2,   0.01, track.fDecay,   v => track.fDecay   = v, v => v.toFixed(2)),
+        knob('fS', 0,     1,   0.01, track.fSustain, v => track.fSustain = v, v => v.toFixed(2)),
+        knob('fR', 0.01,  3,   0.01, track.fRelease, v => track.fRelease = v, v => v.toFixed(2)),
+        knob('aA', 0.001, 1, 0.001, track.attack,  v => track.attack  = v, v => v.toFixed(3)),
+        knob('aD', 0.01,  2,   0.01, track.decay,   v => track.decay   = v, v => v.toFixed(2)),
+        knob('aS', 0,     1,   0.01, track.sustain, v => track.sustain = v, v => v.toFixed(2)),
+        knob('aR', 0.01,  3,   0.01, track.release, v => track.release = v, v => v.toFixed(2)),
       ));
       k.appendChild(group('LFO',
         knob('Rate', 0.05, 30, 0.05, track.lfoRate, v => track.lfoRate = v, v => v.toFixed(2)),
@@ -10254,6 +10274,7 @@
   function rebuildTracksUI() {
     tracksEl.innerHTML = '';
     _masterMeterFill = null;
+    _masterMeterSegs = null;
 
     if (currentMode === 'recording') {
       // Three-zone layout: instruments column + sequencer panel + details
@@ -10317,6 +10338,31 @@
           nameRow.appendChild(el('div', 'panel-track-name', t.name));
           if (t.kind !== 'mic') {
             nameRow.appendChild(buildPatternBankSelector(t));
+            // Sequence-edit actions: randomize + nudge earlier / later.
+            const seqActs = el('div', 'seq-actions');
+            const mkSeq = (label, title, fn) => {
+              const b = el('button', 'small seq-action-btn', label);
+              b.title = title;
+              b.addEventListener('click', (e) => { e.stopPropagation(); fn(); });
+              return b;
+            };
+            seqActs.appendChild(mkSeq('R', 'Randomize this pattern',
+              () => { randomizeTrack(t); rebuildSteps(t); }));
+            seqActs.appendChild(mkSeq('◄', 'Nudge pattern earlier by one step',
+              () => {
+                if (Array.isArray(t.pattern) && t.pattern.length) {
+                  t.pattern.push(t.pattern.shift());
+                  rebuildSteps(t);
+                }
+              }));
+            seqActs.appendChild(mkSeq('►', 'Nudge pattern later by one step',
+              () => {
+                if (Array.isArray(t.pattern) && t.pattern.length) {
+                  t.pattern.unshift(t.pattern.pop());
+                  rebuildSteps(t);
+                }
+              }));
+            nameRow.appendChild(seqActs);
             const previewBtn = el('button', 'small pattern-preview', '▶ Preview');
             previewBtn.title = 'Trigger this patch once without dropping a step';
             previewBtn.addEventListener('click', () => previewTrack(t));
@@ -10490,6 +10536,47 @@
   // ---------- meter loop (Mix tab + master strip) ----------
   let _meterLoopRunning = false;
   let _masterMeterFill  = null;
+  let _masterMeterSegs  = null;
+  // Build a vertical segmented meter (N square cells stacked bottom-up).
+  // Each segment gets a position-derived green→yellow→red colour pair
+  // (faint off / full on) so the scale is always visible.
+  function buildSegmentedMeter(numSegs) {
+    if (!numSegs) numSegs = 14;
+    const m = el('div', 'mix-meter');
+    const segs = [];
+    for (let i = 0; i < numSegs; i++) {
+      const seg = el('div', 'mix-meter-seg');
+      const r = i / (numSegs - 1);
+      let R, G, B;
+      if (r < 0.55) {
+        const t = r / 0.55;          // green → yellow
+        R = Math.round( 60 + t * (255 -  60));
+        G = Math.round(200 + t * (210 - 200));
+        B = Math.round( 80 + t * ( 30 -  80));
+      } else {
+        const t = (r - 0.55) / 0.45;  // yellow → red
+        R = Math.round(255 + t * (240 - 255));
+        G = Math.round(210 + t * ( 60 - 210));
+        B = Math.round( 30 + t * ( 50 -  30));
+      }
+      seg.style.setProperty('--seg-on',  `rgb(${R},${G},${B})`);
+      seg.style.setProperty('--seg-off', `rgba(${R},${G},${B},0.18)`);
+      m.appendChild(seg);
+      segs.push(seg);
+    }
+    return { meter: m, segs };
+  }
+  function setMeterSegs(segs, peak) {
+    if (!segs || !segs.length) return;
+    const litCount = Math.min(segs.length, Math.round(Math.min(1, peak * 1.3) * segs.length));
+    for (let i = 0; i < segs.length; i++) {
+      const on = i < litCount;
+      if (segs[i]._lit !== on) {
+        segs[i].classList.toggle('lit', on);
+        segs[i]._lit = on;
+      }
+    }
+  }
   function meterPeak(analyser, buf) {
     analyser.getFloatTimeDomainData(buf);
     let max = 0;
@@ -10506,14 +10593,12 @@
     const loop = () => {
       if (!audioCtx) { _meterLoopRunning = false; return; }
       for (const t of tracks) {
-        if (t.trkMeter && t._meterFill) {
-          const peak = meterPeak(t.trkMeter, buf);
-          t._meterFill.style.height = Math.min(100, peak * 130) + '%';
+        if (t.trkMeter && t._meterSegs) {
+          setMeterSegs(t._meterSegs, meterPeak(t.trkMeter, buf));
         }
       }
-      if (masterMeter && _masterMeterFill) {
-        const peak = meterPeak(masterMeter, buf);
-        _masterMeterFill.style.height = Math.min(100, peak * 130) + '%';
+      if (masterMeter && _masterMeterSegs) {
+        setMeterSegs(_masterMeterSegs, meterPeak(masterMeter, buf));
       }
       requestAnimationFrame(loop);
     };
@@ -10562,11 +10647,9 @@
     wrap.appendChild(eqWrap);
 
     const strip = el('div', 'mix-strip');
-    const meter = el('div', 'mix-meter');
-    const meterFill = el('div', 'mix-meter-fill');
-    meter.appendChild(meterFill);
-    _masterMeterFill = meterFill;
-    strip.appendChild(meter);
+    const masterMeterRes = buildSegmentedMeter(14);
+    _masterMeterSegs = masterMeterRes.segs;
+    strip.appendChild(masterMeterRes.meter);
 
     const faderWrap = el('div', 'mix-fader-wrap');
     const fader = el('input', 'mix-fader');
@@ -10921,13 +11004,24 @@
     buildLPFilter(); buildHPFilter();
     applyCollapsibles();
   }
+  // ---- Random project-name suggestion (2–5 words) ----
+  const _NAME_ADJ = ['Liquid','Crystal','Deep','Lush','Slow','Soft','Warm','Dusty','Drifting','Velvet','Distant','Hidden','Quiet','Vivid','Hollow','Floating','Faded','Endless','Silent','Glowing','Bright','Dim','Faint','Smoky','Mellow','Sapphire','Amber','Indigo','Coral','Pale'];
+  const _NAME_NOUN= ['Echo','Drift','Stratum','Pulse','Aurora','Mirage','Mist','Tide','Bloom','Horizon','Lattice','Vapour','Signal','Field','Pattern','Lullaby','Atlas','Anthem','Glow','Theory','Geometry','Mantra','Spectrum','Voyage','Garden','Chamber','Movement','Verse','Refraction','Sediment'];
+  function randomProjectName() {
+    const count = 2 + Math.floor(Math.random() * 4);   // 2..5
+    const words = [];
+    for (let i = 0; i < count; i++) {
+      const pool = (i % 2 === 0) ? _NAME_ADJ : _NAME_NOUN;
+      words.push(pool[Math.floor(Math.random() * pool.length)]);
+    }
+    return words.join(' ');
+  }
   async function saveProject(forceRename) {
     let filename;
     if (currentProjectName && !forceRename) {
       filename = currentProjectName;  // overwrite silently
     } else {
-      const ts = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
-      const suggested = currentProjectName || ('substrata-' + ts);
+      const suggested = currentProjectName || randomProjectName();
       const name = window.prompt('Save project as:', suggested);
       if (!name) return;
       filename = /\.json$/i.test(name) ? name : (name + '.json');
