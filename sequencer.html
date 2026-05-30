@@ -80,10 +80,30 @@
   /* Side effects panel only shows on the Effects tab */
   .side { display: none; }
   body.mode-effects .side {
+    display: flex;
+    flex-direction: column;
+    gap: 28px;
+  }
+  /* Each section is its own auto-fit grid so module cards still flow into
+     multiple columns, but live under a labelled header. */
+  body.mode-effects .fx-section {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
     gap: 18px;
   }
+  body.mode-effects .fx-section-title {
+    grid-column: 1 / -1;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    color: var(--accent);
+    font-weight: 600;
+    margin: 0;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--line);
+  }
+  /* Hidden when not in Effects mode (mirrors .side itself). */
+  .fx-section, .fx-section-title { display: none; }
 
   .transport {
     display: flex;
@@ -2026,19 +2046,31 @@
 
     <aside class="side">
       <div class="module" id="fx-racks"></div>
-      <div class="module" id="master"></div>
-      <div class="module" id="comp"></div>
-      <div class="module" id="ducker"></div>
-      <div class="module" id="delay"></div>
-      <div class="module" id="space-echo"></div>
-      <div class="module" id="reverb"></div>
-      <div class="module" id="chorus"></div>
-      <div class="module" id="flanger"></div>
-      <div class="module" id="bitcrush"></div>
-      <div class="module" id="tape"></div>
-      <div class="module" id="lofi"></div>
-      <div class="module" id="lpfilter"></div>
-      <div class="module" id="hpfilter"></div>
+
+      <section class="fx-section">
+        <h3 class="fx-section-title">Mastering</h3>
+        <div class="module" id="master"></div>
+        <div class="module" id="comp"></div>
+        <div class="module" id="ducker"></div>
+        <div class="module" id="tape"></div>
+        <div class="module" id="lofi"></div>
+      </section>
+
+      <section class="fx-section">
+        <h3 class="fx-section-title">Filters</h3>
+        <div class="module" id="lpfilter"></div>
+        <div class="module" id="hpfilter"></div>
+      </section>
+
+      <section class="fx-section">
+        <h3 class="fx-section-title">Sends</h3>
+        <div class="module" id="delay"></div>
+        <div class="module" id="space-echo"></div>
+        <div class="module" id="reverb"></div>
+        <div class="module" id="chorus"></div>
+        <div class="module" id="flanger"></div>
+        <div class="module" id="bitcrush"></div>
+      </section>
     </aside>
   </div>
 
