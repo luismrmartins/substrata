@@ -931,6 +931,13 @@
     gap: 8px;
     padding-top: 10px;
     border-top: 1px solid var(--line);
+    flex-wrap: wrap;
+  }
+  .live-global-sep {
+    flex: 0 0 1px;
+    align-self: stretch;
+    background: var(--line);
+    margin: 0 4px;
   }
   .live-xfade-row {
     display: flex;
@@ -1770,6 +1777,10 @@
           </div>
         </div>
         <div class="live-global-row">
+          <button class="small" id="live-pause" title="Pause all tracks; press again to resume from the same step">Pause</button>
+          <button class="small" id="live-hold"  title="Hold to pause all tracks (release to resume from the same step)">Hold</button>
+          <button class="small" id="live-stop"  title="Stop all tracks; press again to start over from step 1">Stop</button>
+          <span class="live-global-sep"></span>
           <button class="small" id="live-arm-all"   title="Arm every channel on both decks (deferred to next downbeat)">Arm all</button>
           <button class="small" id="live-unarm-all" title="Unarm every channel on both decks (deferred to next downbeat)">Unarm all</button>
         </div>
@@ -10522,6 +10533,76 @@
   const unarmAllBtn = document.getElementById('live-unarm-all');
   if (armAllBtn)   armAllBtn.addEventListener('click',   () => setAllArmed(true));
   if (unarmAllBtn) unarmAllBtn.addEventListener('click', () => setAllArmed(false));
+
+  // ---- Live transport: Pause / Hold / Stop ----
+  // pauseAll() halts the scheduler but keeps each track's nextStep so
+  // resumeAll() can shift the schedule forward without losing position.
+  function pauseAll() {
+    if (!isPlaying) return;
+    isPlaying = false;
+    clearInterval(schedulerTimer); schedulerTimer = null;
+    for (const t of tracks) highlightStep(t, -1);
+    playBtn.textContent = 'Play';
+    playBtn.classList.remove('playing');
+  }
+  function resumeAll() {
+    if (isPlaying) return;
+    initAudio();
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+    isPlaying = true;
+    // Shift every track so the earliest pending step fires ~50 ms from
+    // now; the relative spacing between tracks is preserved.
+    const now = audioCtx.currentTime + 0.05;
+    let minNext = Infinity;
+    for (const t of tracks) {
+      if (typeof t.nextNoteTime === 'number') minNext = Math.min(minNext, t.nextNoteTime);
+    }
+    if (!isFinite(minNext)) minNext = now;
+    const offset = now - minNext;
+    for (const t of tracks) {
+      if (typeof t.nextNoteTime === 'number') t.nextNoteTime += offset;
+      t._prevFreq = null;
+      t._prevSlide = false;
+      t._lastTrigGain = null;
+    }
+    playBtn.textContent = 'Stop';
+    playBtn.classList.add('playing');
+    schedulerTimer = setInterval(scheduler, LOOKAHEAD);
+  }
+
+  const livePauseBtn = document.getElementById('live-pause');
+  const liveHoldBtn  = document.getElementById('live-hold');
+  const liveStopBtn  = document.getElementById('live-stop');
+
+  if (livePauseBtn) livePauseBtn.addEventListener('click', () => {
+    if (isPlaying) { pauseAll(); livePauseBtn.classList.add('on'); }
+    else           { resumeAll(); livePauseBtn.classList.remove('on'); }
+  });
+
+  if (liveHoldBtn) {
+    // Hold = pause while pointer is down, resume on release. Pointer events
+    // on the document handle the release even if the user moves off the
+    // button before letting go.
+    liveHoldBtn.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      if (!isPlaying) return;
+      pauseAll();
+      liveHoldBtn.classList.add('on');
+      const release = () => {
+        resumeAll();
+        liveHoldBtn.classList.remove('on');
+        document.removeEventListener('pointerup', release);
+        document.removeEventListener('pointercancel', release);
+      };
+      document.addEventListener('pointerup', release);
+      document.addEventListener('pointercancel', release);
+    });
+  }
+
+  if (liveStopBtn) liveStopBtn.addEventListener('click', () => {
+    if (isPlaying) { pauseAll(); liveStopBtn.classList.add('on'); }
+    else { start(); liveStopBtn.classList.remove('on'); }   // start() resets every track to step 0
+  });
   setLiveCrossfade(0.5);
 
   // ---- per-deck EQ UI ----
