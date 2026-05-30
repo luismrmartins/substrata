@@ -263,10 +263,38 @@
     color: var(--text);
     letter-spacing: 0.3px;
   }
-  .panel-track-name {
+  .panel-track-name-row {
+    display: flex;
+    align-items: center;
+    gap: 14px;
     margin-bottom: 14px;
     padding-bottom: 10px;
     border-bottom: 1px solid var(--line);
+  }
+  /* Pattern bank selector (A/B/C/D) — small toggle row that switches
+     between four step-sequence snapshots for the same instrument. */
+  .pattern-banks {
+    display: flex;
+    gap: 4px;
+  }
+  .pattern-bank-btn {
+    width: 22px;
+    height: 22px;
+    background: transparent;
+    border: 1px solid var(--cell-border);
+    color: var(--text);
+    font: inherit;
+    font-size: 10px;
+    font-weight: 500;
+    cursor: pointer;
+    text-align: center;
+    padding: 0;
+  }
+  .pattern-bank-btn:hover { border-color: var(--text); }
+  .pattern-bank-btn.active {
+    background: var(--accent);
+    color: #fff;
+    border-color: var(--accent);
   }
   .panel-seq-header {
     padding-bottom: 10px;
@@ -274,14 +302,35 @@
     border-bottom: 1px solid var(--line);
   }
   .panel-seq-header .group { border-left: none; padding-left: 0; }
-  /* Sequencer step grid: at most 16 cells per row — wraps to a new row
-     for longer patterns. Uses CSS grid with 16 explicit columns so that
-     no matter the available width the grid stays at 16-per-line. */
+  /* Sequencer step grid: at most 16 cells per row — wraps to additional
+     rows for longer patterns. Wrapped in a max-height container so that
+     128-step patterns scroll instead of pushing the layout past the
+     fixed bottom mixer. */
+  .panel-sequencer {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+  }
   .panel-sequencer .steps-row {
     display: grid;
     grid-template-columns: repeat(16, auto);
     gap: 3px;
     width: max-content;
+    max-height: calc(70vh - 220px);
+    overflow-y: auto;
+  }
+  /* Live mode: stack name + pattern banks vertically inside the strip */
+  body.mode-live .live-name-wrap {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    flex: 0 0 96px;
+    min-width: 0;
+  }
+  body.mode-live .live-name-wrap .pattern-bank-btn {
+    width: 18px;
+    height: 18px;
+    font-size: 9px;
   }
   .panel-details .track-knobs {
     display: flex;
@@ -1634,7 +1683,6 @@
         <div class="tabs" id="mode-toggle">
           <button data-mode="recording" class="on">Track</button>
           <button data-mode="effects">Effects</button>
-          <button data-mode="mixing">Mix</button>
           <button data-mode="live">Live</button>
         </div>
         <button id="folder" class="small" title="set project folder">📁 Folder</button>
@@ -3744,6 +3792,11 @@
       // of save. The slider lerps between them at playback.
       morphStates: { A: null, B: null, C: null },
       morphPos: 0,
+      // Four pattern banks per track — same instrument, four different
+      // step sequences. activeBank stays referenced by track.pattern so
+      // any edit to the live grid auto-saves into the active bank.
+      patternBanks: null,
+      activeBank: 'A',
       expanded: true,
       _prevFreq: null, _prevSlide: false,
       nextStep: 0, nextNoteTime: 0,
@@ -9282,6 +9335,49 @@
     _resizeMixerTimer = requestAnimationFrame(() => resizeMixerStrips());
   });
 
+  // ---------- Per-track pattern banks (A / B / C / D) ----------
+  // Each track keeps four step-sequence snapshots that share the same
+  // instrument. Switching banks repoints track.pattern to that bank's
+  // array, so any edit you make to the visible grid is auto-saved into
+  // the active bank (no separate "Save" step). Initialised lazily so
+  // existing projects that don't have banks just see bank A populated.
+  const PATTERN_BANKS = ['A','B','C','D'];
+  function ensurePatternBanks(track) {
+    if (!track.patternBanks) {
+      track.patternBanks = {};
+      PATTERN_BANKS.forEach(b => {
+        track.patternBanks[b] = (b === (track.activeBank || 'A'))
+          ? track.pattern
+          : (track.pattern || []).map(e => e ? { ...e } : null);
+      });
+      track.activeBank = track.activeBank || 'A';
+    }
+    // Always keep the active bank pointed at the live pattern.
+    track.patternBanks[track.activeBank] = track.pattern;
+  }
+  function switchPatternBank(track, bank) {
+    if (!PATTERN_BANKS.includes(bank)) return;
+    if (track.activeBank === bank) return;
+    ensurePatternBanks(track);
+    // Save the current bank, then load the new one.
+    track.patternBanks[track.activeBank] = track.pattern;
+    track.activeBank = bank;
+    track.pattern = track.patternBanks[bank];
+    rebuildTracksUI();
+  }
+  function buildPatternBankSelector(track) {
+    ensurePatternBanks(track);
+    const wrap = el('div', 'pattern-banks');
+    PATTERN_BANKS.forEach(b => {
+      const btn = el('button', 'pattern-bank-btn', b);
+      if (track.activeBank === b) btn.classList.add('active');
+      btn.title = 'Switch to pattern ' + b + ' (edits auto-save to the active bank)';
+      btn.addEventListener('click', (e) => { e.stopPropagation(); switchPatternBank(track, b); });
+      wrap.appendChild(btn);
+    });
+    return wrap;
+  }
+
   // ---------- Per-track A / B / C morph ----------
   // Each track stores up to three snapshots of its instrument + channel
   // parameters. A slider lerps between A→B (pos 0..1) and B→C (pos 1..2)
@@ -9540,8 +9636,11 @@
         // ABOVE the step grid; the rest is partitioned into Instrument /
         // Channel sections in the details panel.
         if (t.id === selectedTrackId) {
-          // Track name at the top of the sequencer column
-          seqPanel.appendChild(el('div', 'panel-track-name', t.name));
+          // Track name + pattern-bank selector at the top of the sequencer column
+          const nameRow = el('div', 'panel-track-name-row');
+          nameRow.appendChild(el('div', 'panel-track-name', t.name));
+          if (t.kind !== 'mic') nameRow.appendChild(buildPatternBankSelector(t));
+          seqPanel.appendChild(nameRow);
           if (knobs && t.kind !== 'mic' && knobs.firstElementChild) {
             const std = knobs.firstElementChild;
             const header = el('div', 'panel-seq-header');
@@ -9606,6 +9705,19 @@
         buildTrack(t);
         const wrap = tracksEl.lastElementChild;
         if (!wrap || wrap === deckAEl || wrap === deckBEl) return;
+        // Inject the pattern-bank selector under the name in each live
+        // channel strip (mic tracks have no steps so skip them). Replace
+        // the bare name with a column wrapper holding [name, banks].
+        if (t.kind !== 'mic') {
+          const meta = wrap.querySelector('.track-meta');
+          const nameEl = wrap.querySelector('.track-name');
+          if (meta && nameEl) {
+            const nameWrap = el('div', 'live-name-wrap');
+            meta.insertBefore(nameWrap, nameEl);
+            nameWrap.appendChild(nameEl);
+            nameWrap.appendChild(buildPatternBankSelector(t));
+          }
+        }
         const target = t.deck === 'B' ? deckBEl : deckAEl;
         target.appendChild(wrap);
       });
@@ -9936,7 +10048,8 @@
              'eqLow','eqMid','eqHigh',
              'delaySend','reverbSend','chorusSend','flangerSend','bitcrushSend','spaceEchoSend','duckAmt',
              'trkLfoRate','trkLfoShape','trkLfoVolDepth','trkLfoPanDepth',
-             'morphStates','morphPos'],
+             'morphStates','morphPos',
+             'patternBanks','activeBank'],
     drum:   ['voiceType','tune'],
     bass:   ['root','wave','subLevel','sinLevel','sawLevel','cutoff','reso','env','fDecay',
              'attack','decay','sustain','release',
