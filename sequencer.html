@@ -1096,13 +1096,18 @@
     flex-shrink: 0;
   }
   body.mode-live .toggle { width: 20px; height: 20px; font-size: 9px; }
-  /* Per-channel volume slider — takes remaining horizontal space */
+  /* Per-channel volume slider — stacks label above the slider + readout. */
   body.mode-live .live-vol-row {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    flex: 1;
+    min-width: 80px;
+  }
+  body.mode-live .live-vol-inner {
     display: flex;
     align-items: center;
     gap: 8px;
-    flex: 1;
-    min-width: 60px;
   }
   body.mode-live .live-vol-row input[type="range"] {
     flex: 1;
@@ -1116,6 +1121,19 @@
     font-variant-numeric: tabular-nums;
     width: 32px;
     text-align: right;
+  }
+  /* Small uppercase tag above each feature group in a live channel strip */
+  .live-feature-label {
+    font-size: 8px;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 1.2px;
+    margin-bottom: 2px;
+  }
+  body.mode-live .live-feature {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
   }
   body.mode-live .master-strip { display: none !important; }
   body.mode-live .mix-eq-wrap,
@@ -9744,8 +9762,30 @@
             const nameWrap = el('div', 'live-name-wrap');
             meta.insertBefore(nameWrap, nameEl);
             nameWrap.appendChild(nameEl);
+            nameWrap.appendChild(el('div', 'live-feature-label', 'Sections'));
             nameWrap.appendChild(buildPatternBankSelector(t));
           }
+        }
+        // Label every feature group in the live channel strip so the
+        // controls read at a glance: Sections | Tools | Volume | Morphs.
+        const meta = wrap.querySelector('.track-meta');
+        const toggles = wrap.querySelector('.toggles');
+        if (meta && toggles) {
+          const toolsWrap = el('div', 'live-feature');
+          meta.insertBefore(toolsWrap, toggles);
+          toolsWrap.appendChild(el('div', 'live-feature-label', 'Tools'));
+          toolsWrap.appendChild(toggles);
+        }
+        const volRow = wrap.querySelector('.live-vol-row');
+        if (volRow) {
+          const inner = el('div', 'live-vol-inner');
+          while (volRow.firstChild) inner.appendChild(volRow.firstChild);
+          volRow.appendChild(el('div', 'live-feature-label', 'Volume'));
+          volRow.appendChild(inner);
+        }
+        const morphRow = wrap.querySelector('.live-morph-row');
+        if (morphRow) {
+          morphRow.insertBefore(el('div', 'live-feature-label', 'Morphs'), morphRow.firstChild);
         }
         const target = t.deck === 'B' ? deckBEl : deckAEl;
         target.appendChild(wrap);
