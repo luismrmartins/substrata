@@ -220,18 +220,24 @@
 
   /* ---- Track mode (recording): three columns — instruments | sequencer
      (with quick controls above) | details (Instrument + Channel). */
-  /* Padding-bottom reserves room for the fixed mixer at the bottom of
-     the viewport so scrollable content above doesn't hide under it. */
-  body.mode-recording { padding-bottom: 30vh; }
+  /* Padding-bottom reserves room for the fixed mixer at the bottom of the
+     viewport so scrollable content above doesn't hide under it. Combined
+     with box-sizing: border-box, the body's min-height (100vh from the
+     base rule) absorbs the padding instead of adding to it — without
+     this the body would always be 130vh tall and scroll. */
+  body.mode-recording {
+    box-sizing: border-box;
+    padding-bottom: 30vh;
+  }
   body.mode-recording #tracks {
     display: grid;
     grid-template-columns: 220px auto minmax(280px, 1fr);
     gap: 24px;
     /* Columns stretch to the tallest sibling so the divider lines span
-       the full height of the visible content area (viewport - transport
-       above - fixed mixer below). */
+       the full height of the visible content area. Min-height left some
+       margin so the layout doesn't push the body past the viewport. */
     align-items: stretch;
-    min-height: calc(70vh - 130px);
+    min-height: calc(70vh - 160px);
   }
   .panel-instruments {
     display: flex;
