@@ -5,7 +5,7 @@
 <title>substrata</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,400&family=DM+Mono:wght@300;400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,400&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
 <style>
   :root {
     /* Light theme — Warm White */
@@ -40,7 +40,7 @@
     margin: 0;
     background: var(--bg);
     color: var(--text);
-    font-family: 'DM Mono', ui-monospace, Menlo, monospace;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
     font-weight: 400;
     font-size: 11px;
     line-height: 1.4;
@@ -5122,6 +5122,34 @@
 
   // ---------- presets (drum / bass / lead / chord) ----------
   const PRESET_KINDS = new Set(['drum','bass','lead','sh101','juno','cs80','chord','mellotron']);
+  // Auto-categorise non-drum presets by name so the dropdown groups them
+  // (Sub / Acid / Wobble / Pluck / Pad / Lead / Bell / Brass / Strings / Choir / Stab / Bass / Other).
+  // Drums are already nested by machine and skip this entirely.
+  function categoriseFromName(kind, name) {
+    if (!name) return 'Other';
+    if (name.includes(' — ')) return name.split(' — ')[0];      // explicit "Pad — Warm Strings"
+    const n = name.toLowerCase();
+    const tests = [
+      [/sub|808|sine sub|deep sub|bumpy sub|pure sub|sub pluck|sub bomb|sub boom|sub mellotron/, 'Sub'],
+      [/acid|squelch|303|tb-?303/,                                    'Acid'],
+      [/wobble|wob /,                                                 'Wobble'],
+      [/reese/,                                                       'Reese'],
+      [/drone|sweep|wash|wind|cosmic|space|texture|atmosphere|atmospheric|cinema/, 'Pad'],
+      [/pad|ambient|ethereal|wash|drift|floating|hollow/,             'Pad'],
+      [/string|cello|violin|viola|orchestr/,                          'Strings'],
+      [/choir|vox|voice|aah|doo|hum/,                                 'Choir'],
+      [/flute|pan/,                                                   'Wind'],
+      [/brass|horn|trumpet|trombone|section|tuba/,                    'Brass'],
+      [/bell|chime|crystal|glass|tubular|marimba|music box/,          'Bell'],
+      [/pluck|pick|guitar/,                                           'Pluck'],
+      [/stab|hit|chord stab|kompakt|garage|punch|snappy/,             'Stab'],
+      [/key|rhodes|wurli|epiano|electric|piano|clav|organ/,           'Keys'],
+      [/lead|solo|sync lead|hoover|cutting|whistle|brass lead|trance|saw lead|squeal/, 'Lead'],
+      [/bass|sub|growl|funky|liquid|tube|talkbox|berlin|detroit|house bumpy|garage bumpy|warlock|wobble/, 'Bass'],
+    ];
+    for (const [rx, label] of tests) if (rx.test(n)) return label;
+    return 'Other';
+  }
 
   // Bundled factory presets — classic Prophet-5 patches for lead (mono) and chord (poly).
   const FACTORY_PRESETS = {
@@ -7935,13 +7963,22 @@
           } else {
             const fNames = Object.keys(factory).sort();
             if (fNames.length) {
-              const og = document.createElement('optgroup');
-              og.label = 'Factory';
+              // Bucket each preset name into a category for a more
+              // navigable dropdown — one optgroup per category.
+              const byCat = {};
               fNames.forEach(n => {
-                const op = el('option', null, n); op.value = 'f:' + n;
-                og.appendChild(op);
+                const c = categoriseFromName(track.kind, n);
+                (byCat[c] = byCat[c] || []).push(n);
               });
-              sel.appendChild(og);
+              Object.keys(byCat).sort().forEach(cat => {
+                const og = document.createElement('optgroup');
+                og.label = cat;
+                byCat[cat].forEach(n => {
+                  const op = el('option', null, n); op.value = 'f:' + n;
+                  og.appendChild(op);
+                });
+                sel.appendChild(og);
+              });
             }
           }
           const uNames = Object.keys(user).sort();
