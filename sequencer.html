@@ -296,6 +296,22 @@
     color: #fff;
     border-color: var(--accent);
   }
+  /* Preview button (Track tab, right of the bank selector) */
+  .panel-track-name-row .pattern-preview {
+    margin-left: auto;
+  }
+  .pattern-preview {
+    background: transparent;
+    border: 1px solid var(--cell-border);
+    color: var(--text);
+    font: inherit;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+    padding: 5px 10px;
+    cursor: pointer;
+  }
+  .pattern-preview:hover { border-color: var(--text); }
   .panel-seq-header {
     padding-bottom: 10px;
     margin-bottom: 12px;
@@ -1061,19 +1077,41 @@
     gap: 4px;
     min-height: 80px;
   }
-  /* Compact horizontal channel strip — one row per channel for fast live mixing. */
+  /* Two-row channel strip — top row: name + Sections; bottom row: Tools,
+     Volume, Morphs side by side. */
   body.mode-live .track {
     display: flex !important;
-    flex-direction: row;
-    align-items: center;
-    gap: 12px;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
     border: 1px solid var(--line);
     border-radius: 3px;
-    padding: 6px 10px;
+    padding: 8px 10px;
     grid-template-columns: unset;
     overflow: hidden;
     width: 100%;
   }
+  body.mode-live .live-row-1 {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 14px;
+    flex-wrap: wrap;
+  }
+  body.mode-live .live-row-2 {
+    display: flex;
+    flex-direction: row;
+    align-items: flex-start;
+    gap: 18px;
+    flex-wrap: wrap;
+  }
+  body.mode-live .live-sections-inline {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 8px;
+  }
+  body.mode-live .live-sections-inline .live-feature-label { margin: 0; }
   body.mode-live .track-meta {
     display: flex !important;
     flex-direction: row;
@@ -9436,6 +9474,20 @@
     return wrap;
   }
 
+  function previewTrack(track) {
+    if (!track || track.kind === 'mic' || !track.voice) return;
+    initAudio();
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+    if (!track.input) initTrackAudio(track);
+    const bpm = parseFloat(bpmInput.value) || 120;
+    const stepDur = (60 / bpm) / 4;
+    const at = audioCtx.currentTime + 0.02;
+    const env = { stepDur, prevFreq: null, prevSlide: false };
+    const step = { pitch: 0, slide: false, length: 1.0, velocity: 1.0 };
+    try { track.voice(audioCtx, at, track.input, track, step, env); }
+    catch (e) { console.warn('Preview failed:', e); }
+  }
+
   // ---------- Per-track A / B / C morph ----------
   // Each track stores up to three snapshots of its instrument + channel
   // parameters. A slider lerps between A→B (pos 0..1) and B→C (pos 1..2)
@@ -9694,10 +9746,18 @@
         // ABOVE the step grid; the rest is partitioned into Instrument /
         // Channel sections in the details panel.
         if (t.id === selectedTrackId) {
-          // Track name + pattern-bank selector at the top of the sequencer column
+          // Track name + pattern-bank selector at the top of the sequencer
+          // column, with a Preview button pushed to the right that triggers
+          // the current patch once without writing a step.
           const nameRow = el('div', 'panel-track-name-row');
           nameRow.appendChild(el('div', 'panel-track-name', t.name));
-          if (t.kind !== 'mic') nameRow.appendChild(buildPatternBankSelector(t));
+          if (t.kind !== 'mic') {
+            nameRow.appendChild(buildPatternBankSelector(t));
+            const previewBtn = el('button', 'small pattern-preview', '▶ Preview');
+            previewBtn.title = 'Trigger this patch once without dropping a step';
+            previewBtn.addEventListener('click', () => previewTrack(t));
+            nameRow.appendChild(previewBtn);
+          }
           seqPanel.appendChild(nameRow);
           if (knobs && t.kind !== 'mic' && knobs.firstElementChild) {
             const std = knobs.firstElementChild;
@@ -9763,30 +9823,17 @@
         buildTrack(t);
         const wrap = tracksEl.lastElementChild;
         if (!wrap || wrap === deckAEl || wrap === deckBEl) return;
-        // Inject the pattern-bank selector under the name in each live
-        // channel strip (mic tracks have no steps so skip them). Replace
-        // the bare name with a column wrapper holding [name, banks].
-        if (t.kind !== 'mic') {
-          const meta = wrap.querySelector('.track-meta');
-          const nameEl = wrap.querySelector('.track-name');
-          if (meta && nameEl) {
-            const nameWrap = el('div', 'live-name-wrap');
-            meta.insertBefore(nameWrap, nameEl);
-            nameWrap.appendChild(nameEl);
-            nameWrap.appendChild(el('div', 'live-feature-label', 'Sections'));
-            nameWrap.appendChild(buildPatternBankSelector(t));
-          }
-        }
-        // Label every feature group in the live channel strip so the
-        // controls read at a glance: Sections | Tools | Volume | Morphs.
+        // Wrap toggles in a labelled Tools column. (mic tracks have no
+        // pattern-banks but still get Tools / Volume.)
         const meta = wrap.querySelector('.track-meta');
         const toggles = wrap.querySelector('.toggles');
+        let toolsWrap = null;
         if (meta && toggles) {
-          const toolsWrap = el('div', 'live-feature');
-          meta.insertBefore(toolsWrap, toggles);
+          toolsWrap = el('div', 'live-feature');
           toolsWrap.appendChild(el('div', 'live-feature-label', 'Tools'));
           toolsWrap.appendChild(toggles);
         }
+        // Wrap the volume slider + readout under a Volume label.
         const volRow = wrap.querySelector('.live-vol-row');
         if (volRow) {
           const inner = el('div', 'live-vol-inner');
@@ -9794,10 +9841,33 @@
           volRow.appendChild(el('div', 'live-feature-label', 'Volume'));
           volRow.appendChild(inner);
         }
+        // Morph row gets its label too.
         const morphRow = wrap.querySelector('.live-morph-row');
         if (morphRow) {
           morphRow.insertBefore(el('div', 'live-feature-label', 'Morphs'), morphRow.firstChild);
         }
+
+        // Build the pattern-bank selector inline next to the track name,
+        // then reorganise the strip into two rows: row 1 = name + Sections;
+        // row 2 = Tools + Volume + Morphs.
+        const nameEl = wrap.querySelector('.track-name');
+        const row1 = el('div', 'live-row-1');
+        const row2 = el('div', 'live-row-2');
+        if (nameEl) row1.appendChild(nameEl);
+        if (t.kind !== 'mic') {
+          const sectionsBlock = el('div', 'live-sections-inline');
+          sectionsBlock.appendChild(el('div', 'live-feature-label', 'Sections'));
+          sectionsBlock.appendChild(buildPatternBankSelector(t));
+          row1.appendChild(sectionsBlock);
+        }
+        if (toolsWrap) row2.appendChild(toolsWrap);
+        if (volRow)    row2.appendChild(volRow);
+        if (morphRow)  row2.appendChild(morphRow);
+
+        // Replace the wrap's contents with the new two-row layout.
+        wrap.innerHTML = '';
+        wrap.appendChild(row1);
+        wrap.appendChild(row2);
         const target = t.deck === 'B' ? deckBEl : deckAEl;
         target.appendChild(wrap);
       });
