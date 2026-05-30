@@ -288,7 +288,18 @@
     margin-bottom: 10px;
     font-weight: 600;
   }
-  .knobs-section .track-knobs { margin: 0; }
+  /* In the new Track-mode layout the knobs live inside a knobs-section that
+     was moved OUT of the .track wrap, so the default `.track.expanded
+     .track-knobs` rule never fires — turn them on here. */
+  .knobs-section .track-knobs {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    gap: 14px;
+    margin: 0;
+    padding-top: 0;
+    border-top: none;
+  }
   @media (max-width: 900px) {
     body.mode-recording #tracks {
       grid-template-columns: 1fr;
