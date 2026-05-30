@@ -9135,6 +9135,48 @@
     rebuildTracksUI();
     rebuildDuckerSourceOptions();
   }
+  // Pin each bottom-mixer strip's vertical fader + meter to exactly the
+  // space available inside the strip. Necessary because range inputs with
+  // appearance:slider-vertical only respect an explicit pixel height — CSS
+  // flex / grid / 100% height get silently ignored by WebKit.
+  function resizeMixerStrips(panel) {
+    if (!panel) panel = document.querySelector('.panel-mixer');
+    if (!panel) return;
+    const strips = panel.querySelectorAll('.mini-channel, .master-strip');
+    strips.forEach(strip => {
+      const stripH = strip.clientHeight;
+      if (stripH < 80) return;
+      const mixStrip = strip.querySelector('.mix-strip');
+      if (!mixStrip) return;
+      const cs = getComputedStyle(strip);
+      const padT = parseFloat(cs.paddingTop)    || 0;
+      const padB = parseFloat(cs.paddingBottom) || 0;
+      const gap  = parseFloat(cs.rowGap) || parseFloat(cs.gap) || 0;
+      let above = 0;
+      let cur = strip.firstElementChild;
+      let countGaps = 0;
+      while (cur && cur !== mixStrip) {
+        above += cur.offsetHeight;
+        countGaps++;
+        cur = cur.nextElementSibling;
+      }
+      // include the gap below mix-strip's last sibling too
+      countGaps += 1;
+      const avail = Math.max(60, stripH - padT - padB - above - (gap * countGaps));
+      const val   = strip.querySelector('.mix-vol-val');
+      const valH  = val ? val.offsetHeight + 2 : 0;
+      const meter = strip.querySelector('.mix-meter');
+      const fader = strip.querySelector('.mix-fader');
+      if (meter) meter.style.height = avail + 'px';
+      if (fader) fader.style.height = Math.max(60, avail - valH) + 'px';
+    });
+  }
+  let _resizeMixerTimer = null;
+  window.addEventListener('resize', () => {
+    if (_resizeMixerTimer) cancelAnimationFrame(_resizeMixerTimer);
+    _resizeMixerTimer = requestAnimationFrame(() => resizeMixerStrips());
+  });
+
   // Reorganise the children of a track's knobs container into two visual
   // sections: "Instrument" (preset + voice-specific groups) and "Channel"
   // (Stp/Vol/Swg/Mono + Sends + Duck + Track LFO). Relies on the fixed order
@@ -9286,6 +9328,11 @@
       if (masterWrap && masterWrap.classList && masterWrap.classList.contains('master-strip')) {
         mixPanel.appendChild(masterWrap);
       }
+      // Range inputs with appearance:slider-vertical don't honour CSS
+      // height:100% / flex sizing — they only respect explicit pixel
+      // heights. Measure the available room inside each strip after the
+      // browser lays everything out and pin the fader + meter to it.
+      requestAnimationFrame(() => resizeMixerStrips(mixPanel));
       return;
     }
 
