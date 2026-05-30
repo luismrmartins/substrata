@@ -111,7 +111,8 @@
   button.play.playing { background: transparent; color: var(--text); outline: 1px solid var(--accent); }
   .transport button.small,
   .live-controls button.small,
-  .module button.small {
+  .module button.small,
+  .morph-buttons button.small {
     background: transparent;
     border: 1px solid var(--cell-border);
     color: var(--text);
@@ -124,10 +125,12 @@
   }
   .transport button.small:hover,
   .live-controls button.small:hover,
-  .module button.small:hover { border-color: var(--text); }
+  .module button.small:hover,
+  .morph-buttons button.small:hover { border-color: var(--text); }
   .transport button.small.on,
   .live-controls button.small.on,
-  .module button.small.on { background: var(--text); color: var(--bg); border-color: var(--text); }
+  .module button.small.on,
+  .morph-buttons button.small.on { background: var(--text); color: var(--bg); border-color: var(--text); }
 
   .mode-toggle {
     display: inline-flex;
@@ -4368,6 +4371,15 @@
       const x = parseFloat(r.value);
       v.textContent = fmt(x); onChange(x);
     });
+    // Try to infer which track property this knob writes to from the
+    // onChange closure source — used by the morph slider to live-update
+    // every affected slider without rebuilding the panel.
+    try {
+      const src = onChange.toString();
+      const m = src.match(/track\.([\w$]+)\s*=\s*v\b/) || src.match(/t\.([\w$]+)\s*=\s*v\b/);
+      if (m) r.dataset.prop = m[1];
+    } catch (e) {}
+    r._refresh = (newVal) => { r.value = newVal; v.textContent = fmt(parseFloat(r.value)); };
     w.appendChild(r); w.appendChild(v); return w;
   }
   function numField(label, min, max, val, onChange) {
@@ -9270,7 +9282,11 @@
     'mute','solo','armed','mono','group','noteLen',
     'sampleFile','buffer','deviceId','enabled','eqBands',
     'scale','seventh','ninth','subOctave','lfoShape','trkLfoShape','div','sync',
-    'morphStates','morphPos','deck','_pendingMute','_pendingArmed'
+    'morphStates','morphPos','deck','_pendingMute','_pendingArmed',
+    // Track volume + the per-track sends are channel-mix values the user
+    // sets independently of the patch. Keeping them out of the morph means
+    // moving the slider only changes the instrument character.
+    'volume','delaySend','reverbSend','chorusSend','flangerSend','bitcrushSend','spaceEchoSend','duckAmt'
   ]);
 
   function captureMorphState(track) {
@@ -9337,6 +9353,25 @@
     if (track.bitcrushSendN && merged.bitcrushSend !== undefined) track.bitcrushSendN.gain.setTargetAtTime(merged.bitcrushSend,  ct, ramp);
     if (track.spaceEchoSendN&& merged.spaceEchoSend!== undefined) track.spaceEchoSendN.gain.setTargetAtTime(merged.spaceEchoSend, ct, ramp);
     if (track.trkLfo && merged.trkLfoRate !== undefined) track.trkLfo.frequency.setTargetAtTime(merged.trkLfoRate, ct, ramp);
+    // Live-update every slider in the current Track-tab view that's bound
+    // to one of the morphed properties — so the user sees knobs move with
+    // the morph slider, not just hear the sound change.
+    refreshMorphableKnobs(track, merged);
+  }
+
+  function refreshMorphableKnobs(track, mergedParams) {
+    const inputs = document.querySelectorAll(
+      '.panel-details input[data-prop], .panel-sequencer input[data-prop]'
+    );
+    inputs.forEach(input => {
+      const prop = input.dataset.prop;
+      if (!prop) return;
+      if (mergedParams && mergedParams[prop] === undefined) return;
+      const v = track[prop];
+      if (typeof v !== 'number') return;
+      if (input._refresh) input._refresh(v);
+      else input.value = v;
+    });
   }
 
   function saveMorphSlot(track, slot) {
