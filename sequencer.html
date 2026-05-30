@@ -7119,6 +7119,7 @@
     const mBtn  = el('button', 'toggle mute', 'M');
     const sBtn  = el('button', 'toggle solo', 'S');
     const rBtn  = el('button', 'toggle rnd',  'R');
+    const syBtn = el('button', 'toggle sync', '↻');
     const nlBtn = el('button', 'toggle nudge nudge-back', '◄');
     const nrBtn = el('button', 'toggle nudge nudge-fwd',  '►');
     const dBtn  = el('button', 'toggle dup',  'D');
@@ -7127,6 +7128,7 @@
     aBtn.title = 'armed (will play)';
     mBtn.title = 'mute'; sBtn.title = 'solo';
     rBtn.title = 'randomize';
+    syBtn.title = "sync to first track — wait until the first track's next step 1, then start at step 1";
     nlBtn.title = 'nudge pattern earlier by one step';
     nrBtn.title = 'nudge pattern later by one step';
     dBtn.title = 'duplicate track';
@@ -7182,6 +7184,7 @@
     }
     nlBtn.addEventListener('click', (e) => { e.stopPropagation(); nudgePattern(-1); });
     nrBtn.addEventListener('click', (e) => { e.stopPropagation(); nudgePattern( 1); });
+    syBtn.addEventListener('click', (e) => { e.stopPropagation(); syncTrackToFirst(track); });
     dBtn.addEventListener('click', (e) => {
       e.stopPropagation();
       duplicateTrack(track);
@@ -7199,6 +7202,7 @@
     togs.appendChild(mBtn);
     togs.appendChild(sBtn);
     togs.appendChild(rBtn);
+    togs.appendChild(syBtn);
     togs.appendChild(nlBtn);
     togs.appendChild(nrBtn);
     togs.appendChild(dBtn);
@@ -9334,6 +9338,31 @@
     if (_resizeMixerTimer) cancelAnimationFrame(_resizeMixerTimer);
     _resizeMixerTimer = requestAnimationFrame(() => resizeMixerStrips());
   });
+
+  // ---------- Per-track sync ----------
+  // Slip this track so its next step 0 lands on the first track's next
+  // step 0. The track is silent between now and the alignment point —
+  // it picks up cleanly at the first track's downbeat instead of being
+  // re-triggered mid-step.
+  function syncTrackToFirst(track) {
+    if (!audioCtx || tracks.length === 0) return;
+    const ref = tracks[0];
+    if (ref === track) return;          // can't sync the reference to itself
+    if (typeof ref.nextNoteTime !== 'number') return;
+    const bpm = parseFloat(bpmInput.value) || 120;
+    const stepDur = (60 / bpm) / 4;
+    // Time when the first track will next be at step 0
+    const stepsUntilZero = (ref.nextStep === 0) ? 0 : (ref.steps - ref.nextStep);
+    let target = ref.nextNoteTime + stepsUntilZero * stepDur;
+    while (target < audioCtx.currentTime + 0.02) {
+      target += ref.steps * stepDur;     // skip to the next loop if we're already past it
+    }
+    track.nextStep = 0;
+    track.nextNoteTime = target;
+    track._prevFreq = null;
+    track._prevSlide = false;
+    track._lastTrigGain = null;
+  }
 
   // ---------- Per-track pattern banks (A / B / C / D) ----------
   // Each track keeps four step-sequence snapshots that share the same
