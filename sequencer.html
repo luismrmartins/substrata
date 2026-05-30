@@ -1408,6 +1408,7 @@
       <div class="module" id="comp"></div>
       <div class="module" id="ducker"></div>
       <div class="module" id="delay"></div>
+      <div class="module" id="space-echo"></div>
       <div class="module" id="reverb"></div>
       <div class="module" id="chorus"></div>
       <div class="module" id="flanger"></div>
@@ -3408,7 +3409,7 @@
       name: overrides.name || defaultName(kind),
       steps: 16, pattern: [],
       volume: 0.8,
-      delaySend: 0, reverbSend: 0, chorusSend: 0, flangerSend: 0, bitcrushSend: 0,
+      delaySend: 0, reverbSend: 0, chorusSend: 0, flangerSend: 0, bitcrushSend: 0, spaceEchoSend: 0,
       duckAmt: 0,
       mute: false, solo: false, armed: true,
       group: 0,
@@ -3577,6 +3578,16 @@
     return masterIn;
   }
   let delayBus, delayNode, delayFb, delayWet;
+  // Roland RE-201 Space Echo — three tape heads at multiples of a base
+  // delay time, tape saturation + low-pass darkness, wow + flutter LFOs
+  // modulating each head's delay time, regenerative feedback through the
+  // tape colouration. Created in initAudio().
+  let spaceEchoBus, spaceEchoSumIn, spaceEchoSat, spaceEchoTone;
+  let spaceEchoH1, spaceEchoH2, spaceEchoH3;
+  let spaceEchoH1G, spaceEchoH2G, spaceEchoH3G;
+  let spaceEchoMix, spaceEchoFb, spaceEchoWet;
+  let spaceEchoWowLfo, spaceEchoFlutterLfo;
+  let spaceEchoWowG, spaceEchoFlutterG;
   let reverbBus, reverbNode, reverbWet;
   let chorusBus, chorusDelL, chorusDelR, chorusLfoL, chorusLfoR, chorusModL, chorusModR, chorusWet;
   let flangerBus, flangerDel, flangerFb, flangerLfo, flangerMod, flangerWet;
@@ -3592,6 +3603,50 @@
   let tapeCrackleSource, tapeCrackleGain;
   const master      = { vol: 0.9, low: 0, mid: 0, high: 0, warmth: 0 };
   const delayCfg    = { time: 0.375, fb: 0.45, wet: 0.5, sync: false, div: '1/4' };
+  const spaceEchoCfg = {
+    baseTime: 0.18, sync: false, div: '1/8',
+    mode: 'all',        // 'h1' | 'h2' | 'h3' | 'h12' | 'h13' | 'h23' | 'all'
+    intensity: 0.45,    // regenerative feedback through tape
+    wow: 0.20,          // slow tape pitch wobble depth
+    flutter: 0.10,      // fast tape pitch wobble depth
+    sat: 0.30,          // tape head saturation
+    hicut: 4500,        // tape darkness (low-pass cutoff)
+    wet: 0.0
+  };
+  function computeSpaceBase() {
+    if (!spaceEchoCfg.sync) return spaceEchoCfg.baseTime;
+    const beats = DELAY_DIVS[spaceEchoCfg.div] || 0.5;
+    const bpm = parseFloat(bpmInput.value) || 120;
+    return (60 / bpm) * beats;
+  }
+  function applySpaceEchoTimes() {
+    if (!spaceEchoH1) return;
+    const tBase = computeSpaceBase();
+    spaceEchoH1.delayTime.setTargetAtTime(tBase,           audioCtx.currentTime, 0.02);
+    spaceEchoH2.delayTime.setTargetAtTime(tBase * 2,       audioCtx.currentTime, 0.02);
+    spaceEchoH3.delayTime.setTargetAtTime(tBase * 3,       audioCtx.currentTime, 0.02);
+  }
+  function applySpaceEchoMode() {
+    if (!spaceEchoH1G) return;
+    const m = spaceEchoCfg.mode;
+    const v1 = (m === 'h1' || m === 'h12' || m === 'h13' || m === 'all') ? 1 : 0;
+    const v2 = (m === 'h2' || m === 'h12' || m === 'h23' || m === 'all') ? 1 : 0;
+    const v3 = (m === 'h3' || m === 'h13' || m === 'h23' || m === 'all') ? 1 : 0;
+    const norm = 1 / Math.max(1, v1 + v2 + v3);
+    spaceEchoH1G.gain.setTargetAtTime(v1 * norm, audioCtx.currentTime, 0.02);
+    spaceEchoH2G.gain.setTargetAtTime(v2 * norm, audioCtx.currentTime, 0.02);
+    spaceEchoH3G.gain.setTargetAtTime(v3 * norm, audioCtx.currentTime, 0.02);
+  }
+  function makeSpaceSatCurve(amount) {
+    const n = 2048;
+    const curve = new Float32Array(n);
+    const k = 0.1 + amount * 3.5;
+    for (let i = 0; i < n; i++) {
+      const x = (i / (n - 1)) * 2 - 1;
+      curve[i] = Math.tanh(x * k) / Math.tanh(k);
+    }
+    return curve;
+  }
   const DELAY_DIVS = {
     '1/1': 4, '1/2D': 3, '1/2': 2, '1/2T': 4/3,
     '1/4D': 1.5, '1/4': 1, '1/4T': 2/3,
@@ -3861,6 +3916,55 @@
     delayBus.connect(delayNode);
     delayNode.connect(delayFb).connect(delayNode);
     delayNode.connect(delayWet).connect(masterIn);
+
+    // ---- Space Echo (RE-201) ----
+    // Three parallel tape heads (H1=t, H2=2t, H3=3t). Input + feedback are
+    // summed at sumIn, then run through tape saturation + a low-pass for
+    // tape darkness, then split to the three delay heads. Wow + flutter
+    // LFOs drift each head's delay time. Per-head gains select the mode.
+    spaceEchoBus    = audioCtx.createGain();
+    spaceEchoSumIn  = audioCtx.createGain();
+    spaceEchoSat    = audioCtx.createWaveShaper();
+    spaceEchoSat.curve = makeSpaceSatCurve(spaceEchoCfg.sat);
+    spaceEchoSat.oversample = '4x';
+    spaceEchoTone   = audioCtx.createBiquadFilter();
+    spaceEchoTone.type = 'lowpass'; spaceEchoTone.Q.value = 0.7;
+    spaceEchoTone.frequency.value = spaceEchoCfg.hicut;
+    spaceEchoH1 = audioCtx.createDelay(2.0); spaceEchoH1.delayTime.value = spaceEchoCfg.baseTime;
+    spaceEchoH2 = audioCtx.createDelay(2.0); spaceEchoH2.delayTime.value = spaceEchoCfg.baseTime * 2;
+    spaceEchoH3 = audioCtx.createDelay(2.0); spaceEchoH3.delayTime.value = spaceEchoCfg.baseTime * 3;
+    spaceEchoH1G = audioCtx.createGain();
+    spaceEchoH2G = audioCtx.createGain();
+    spaceEchoH3G = audioCtx.createGain();
+    spaceEchoMix = audioCtx.createGain();
+    spaceEchoFb  = audioCtx.createGain(); spaceEchoFb.gain.value = spaceEchoCfg.intensity;
+    spaceEchoWet = audioCtx.createGain(); spaceEchoWet.gain.value = spaceEchoCfg.wet;
+    // Wow & flutter — LFOs modulate every head's delay time
+    spaceEchoWowLfo     = audioCtx.createOscillator(); spaceEchoWowLfo.type = 'sine';
+    spaceEchoWowLfo.frequency.value = 0.6;
+    spaceEchoFlutterLfo = audioCtx.createOscillator(); spaceEchoFlutterLfo.type = 'sine';
+    spaceEchoFlutterLfo.frequency.value = 7;
+    spaceEchoWowG     = audioCtx.createGain(); spaceEchoWowG.gain.value     = spaceEchoCfg.wow     * 0.008;
+    spaceEchoFlutterG = audioCtx.createGain(); spaceEchoFlutterG.gain.value = spaceEchoCfg.flutter * 0.0015;
+    spaceEchoWowLfo.connect(spaceEchoWowG);
+    spaceEchoFlutterLfo.connect(spaceEchoFlutterG);
+    spaceEchoWowG.connect(spaceEchoH1.delayTime);
+    spaceEchoWowG.connect(spaceEchoH2.delayTime);
+    spaceEchoWowG.connect(spaceEchoH3.delayTime);
+    spaceEchoFlutterG.connect(spaceEchoH1.delayTime);
+    spaceEchoFlutterG.connect(spaceEchoH2.delayTime);
+    spaceEchoFlutterG.connect(spaceEchoH3.delayTime);
+    spaceEchoWowLfo.start();
+    spaceEchoFlutterLfo.start();
+    // Routing
+    spaceEchoBus.connect(spaceEchoSumIn);
+    spaceEchoSumIn.connect(spaceEchoSat).connect(spaceEchoTone);
+    spaceEchoTone.connect(spaceEchoH1).connect(spaceEchoH1G).connect(spaceEchoMix);
+    spaceEchoTone.connect(spaceEchoH2).connect(spaceEchoH2G).connect(spaceEchoMix);
+    spaceEchoTone.connect(spaceEchoH3).connect(spaceEchoH3G).connect(spaceEchoMix);
+    spaceEchoMix.connect(spaceEchoFb).connect(spaceEchoSumIn);  // regenerative feedback
+    spaceEchoMix.connect(spaceEchoWet).connect(masterIn);
+    applySpaceEchoMode();
 
     reverbBus  = audioCtx.createGain();
     reverbNode = audioCtx.createConvolver();
@@ -6839,8 +6943,9 @@
     const sendsWrap = el('div', 'mix-sends-wrap');
     sendsWrap.appendChild(el('div', 'mix-sends-title', 'SENDS'));
     const SENDS = [
-      ['DLY', 'delaySend',    'delaySendN'],
-      ['RVB', 'reverbSend',   'reverbSendN'],
+      ['DLY', 'delaySend',     'delaySendN'],
+      ['SPC', 'spaceEchoSend', 'spaceEchoSendN'],
+      ['RVB', 'reverbSend',    'reverbSendN'],
       ['CHO', 'chorusSend',   'chorusSendN'],
       ['FLA', 'flangerSend',  'flangerSendN'],
       ['BIT', 'bitcrushSend', 'bitcrushSendN']
@@ -7488,6 +7593,10 @@
         track.delaySend = v;
         if (track.delaySendN) track.delaySendN.gain.setTargetAtTime(v, audioCtx.currentTime, 0.01);
       }, v => v.toFixed(2)),
+      knob('Spc', 0, 1, 0.01, track.spaceEchoSend || 0, v => {
+        track.spaceEchoSend = v;
+        if (track.spaceEchoSendN) track.spaceEchoSendN.gain.setTargetAtTime(v, audioCtx.currentTime, 0.01);
+      }, v => v.toFixed(2)),
       knob('Rev', 0, 1, 0.01, track.reverbSend, v => {
         track.reverbSend = v;
         if (track.reverbSendN) track.reverbSendN.gain.setTargetAtTime(v, audioCtx.currentTime, 0.01);
@@ -7917,6 +8026,7 @@
       compCfg:     { ...compCfg },
       duckCfg:     { attack: duckCfg.attack, release: duckCfg.release },
       delayCfg:    { ...delayCfg },
+      spaceEchoCfg: { ...spaceEchoCfg },
       reverbCfg:   { ...reverbCfg },
       chorusCfg:   { ...chorusCfg },
       flangerCfg:  { ...flangerCfg },
@@ -7941,6 +8051,7 @@
       if (rack.duckCfg.release !== undefined) duckCfg.release = rack.duckCfg.release;
     }
     if (rack.delayCfg)    Object.assign(delayCfg, rack.delayCfg);
+    if (rack.spaceEchoCfg) Object.assign(spaceEchoCfg, rack.spaceEchoCfg);
     if (rack.reverbCfg)   Object.assign(reverbCfg, rack.reverbCfg);
     if (rack.chorusCfg)   Object.assign(chorusCfg, rack.chorusCfg);
     if (rack.flangerCfg)  Object.assign(flangerCfg, rack.flangerCfg);
@@ -7954,12 +8065,12 @@
   }
 
   function rebuildFxModules() {
-    ['master','comp','ducker','delay','reverb','chorus','flanger','bitcrush','tape','lofi','lpfilter','hpfilter'].forEach(id => {
+    ['master','comp','ducker','delay','space-echo','reverb','chorus','flanger','bitcrush','tape','lofi','lpfilter','hpfilter'].forEach(id => {
       const node = document.getElementById(id);
       if (node) node.innerHTML = '';
     });
     buildMaster(); buildComp(); buildDucker();
-    buildDelay(); buildReverb();
+    buildDelay(); buildSpaceEcho(); buildReverb();
     buildChorus(); buildFlanger(); buildBitcrush(); buildTape(); buildLoFi();
     buildLPFilter(); buildHPFilter();
     applyCollapsibles();
@@ -8157,6 +8268,115 @@
     sideRow(m, 'Wet',  0, 1, 0.01, delayCfg.wet, v => {
       delayCfg.wet = v;
       if (delayWet) delayWet.gain.setTargetAtTime(v, audioCtx.currentTime, 0.02);
+    }, v => v.toFixed(2));
+  }
+  function buildSpaceEcho() {
+    const m = document.getElementById('space-echo');
+    if (!m) return;
+    m.appendChild(el('h2', null, 'Space Echo'));
+
+    // Head mode selector
+    const modeRow = el('div', 'row wide');
+    modeRow.appendChild(el('label', null, 'Mode'));
+    const modeSel = el('select');
+    const MODE_LABELS = [
+      ['h1',  'H1 (single)'], ['h2',  'H2 (single)'], ['h3',  'H3 (single)'],
+      ['h12', 'H1+H2'],       ['h13', 'H1+H3'],       ['h23', 'H2+H3'],
+      ['all', 'H1+H2+H3']
+    ];
+    MODE_LABELS.forEach(([v, label]) => {
+      const op = el('option', null, label); op.value = v;
+      if (v === spaceEchoCfg.mode) op.selected = true;
+      modeSel.appendChild(op);
+    });
+    modeSel.addEventListener('change', () => {
+      spaceEchoCfg.mode = modeSel.value;
+      applySpaceEchoMode();
+    });
+    modeRow.appendChild(modeSel);
+    m.appendChild(modeRow);
+
+    // Sync + division
+    const syncRow = el('div', 'row wide');
+    syncRow.appendChild(el('label', null, 'Sync'));
+    const ctrls = el('div', 'sync-ctrls');
+    const syncBtn = el('button', 'mini-toggle');
+    syncBtn.textContent = spaceEchoCfg.sync ? 'On' : 'Off';
+    if (spaceEchoCfg.sync) syncBtn.classList.add('on');
+    const divSel = el('select');
+    Object.keys(DELAY_DIVS).forEach(k => {
+      const op = el('option', null, k); op.value = k;
+      if (k === spaceEchoCfg.div) op.selected = true;
+      divSel.appendChild(op);
+    });
+    divSel.disabled = !spaceEchoCfg.sync;
+    ctrls.appendChild(syncBtn);
+    ctrls.appendChild(divSel);
+    syncRow.appendChild(ctrls);
+    m.appendChild(syncRow);
+
+    // Base time (H1)
+    const timeRow = el('div', 'row');
+    timeRow.appendChild(el('label', null, 'Rate'));
+    const timeSlider = el('input'); timeSlider.type = 'range';
+    timeSlider.min = 0.04; timeSlider.max = 0.6; timeSlider.step = 0.005;
+    const startT = spaceEchoCfg.sync ? computeSpaceBase() : spaceEchoCfg.baseTime;
+    timeSlider.value = startT;
+    const timeVal = el('span', 'v', startT.toFixed(3));
+    timeSlider.addEventListener('input', () => {
+      if (spaceEchoCfg.sync) { timeSlider.value = computeSpaceBase(); return; }
+      const v = parseFloat(timeSlider.value);
+      spaceEchoCfg.baseTime = v;
+      timeVal.textContent = v.toFixed(3);
+      applySpaceEchoTimes();
+    });
+    timeRow.appendChild(timeSlider);
+    timeRow.appendChild(timeVal);
+    m.appendChild(timeRow);
+
+    function refreshSpaceTimeUI() {
+      const t = spaceEchoCfg.sync ? computeSpaceBase() : spaceEchoCfg.baseTime;
+      timeSlider.value = t;
+      timeVal.textContent = t.toFixed(3);
+    }
+    spaceEchoCfg._refreshUI = refreshSpaceTimeUI;
+
+    syncBtn.addEventListener('click', () => {
+      spaceEchoCfg.sync = !spaceEchoCfg.sync;
+      syncBtn.textContent = spaceEchoCfg.sync ? 'On' : 'Off';
+      syncBtn.classList.toggle('on', spaceEchoCfg.sync);
+      divSel.disabled = !spaceEchoCfg.sync;
+      applySpaceEchoTimes();
+      refreshSpaceTimeUI();
+    });
+    divSel.addEventListener('change', () => {
+      spaceEchoCfg.div = divSel.value;
+      if (spaceEchoCfg.sync) { applySpaceEchoTimes(); refreshSpaceTimeUI(); }
+    });
+
+    sideRow(m, 'Int',  0, 0.95, 0.01, spaceEchoCfg.intensity, v => {
+      spaceEchoCfg.intensity = v;
+      if (spaceEchoFb) spaceEchoFb.gain.setTargetAtTime(v, audioCtx.currentTime, 0.02);
+    }, v => v.toFixed(2));
+    sideRow(m, 'Wow',  0, 1, 0.01, spaceEchoCfg.wow, v => {
+      spaceEchoCfg.wow = v;
+      if (spaceEchoWowG) spaceEchoWowG.gain.setTargetAtTime(v * 0.008, audioCtx.currentTime, 0.02);
+    }, v => v.toFixed(2));
+    sideRow(m, 'Flut', 0, 1, 0.01, spaceEchoCfg.flutter, v => {
+      spaceEchoCfg.flutter = v;
+      if (spaceEchoFlutterG) spaceEchoFlutterG.gain.setTargetAtTime(v * 0.0015, audioCtx.currentTime, 0.02);
+    }, v => v.toFixed(2));
+    sideRow(m, 'Sat',  0, 1, 0.01, spaceEchoCfg.sat, v => {
+      spaceEchoCfg.sat = v;
+      if (spaceEchoSat) spaceEchoSat.curve = makeSpaceSatCurve(v);
+    }, v => v.toFixed(2));
+    sideRow(m, 'HiCut', 800, 12000, 50, spaceEchoCfg.hicut, v => {
+      spaceEchoCfg.hicut = v;
+      if (spaceEchoTone) spaceEchoTone.frequency.setTargetAtTime(v, audioCtx.currentTime, 0.02);
+    }, v => Math.round(v));
+    sideRow(m, 'Wet',  0, 1, 0.01, spaceEchoCfg.wet, v => {
+      spaceEchoCfg.wet = v;
+      if (spaceEchoWet) spaceEchoWet.gain.setTargetAtTime(v, audioCtx.currentTime, 0.02);
     }, v => v.toFixed(2));
   }
   function buildReverb() {
@@ -8485,6 +8705,10 @@
       applyDelayTime();
       if (delayCfg._refreshUI) delayCfg._refreshUI();
     }
+    if (spaceEchoCfg.sync) {
+      applySpaceEchoTimes();
+      if (spaceEchoCfg._refreshUI) spaceEchoCfg._refreshUI();
+    }
   });
 
   // theme toggle
@@ -8532,6 +8756,7 @@
     t.chorusSendN  = audioCtx.createGain();   t.chorusSendN.gain.value  = t.chorusSend;
     t.flangerSendN = audioCtx.createGain();   t.flangerSendN.gain.value = t.flangerSend;
     t.bitcrushSendN= audioCtx.createGain();   t.bitcrushSendN.gain.value= t.bitcrushSend;
+    t.spaceEchoSendN = audioCtx.createGain(); t.spaceEchoSendN.gain.value = t.spaceEchoSend || 0;
     // Bass + SH-101 channels get a fast hard limiter at the very end of the
     // channel strip — catches anything the per-voice cap missed plus user
     // vol/EQ hot-spots, so the low end can't clip into the master no matter
@@ -8562,6 +8787,7 @@
     t.duckGain.connect(t.chorusSendN).connect(chorusBus);
     t.duckGain.connect(t.flangerSendN).connect(flangerBus);
     t.duckGain.connect(t.bitcrushSendN).connect(bitcrushBus);
+    if (spaceEchoBus) t.duckGain.connect(t.spaceEchoSendN).connect(spaceEchoBus);
 
     // continuous track-level LFO modulates tremolo + auto-pan
     t.trkLfo      = audioCtx.createOscillator();
@@ -8600,7 +8826,7 @@
     if (t._scopeStop !== undefined) t._scopeStop = true;
     if (t.trkLfo) { try { t.trkLfo.stop(); } catch (e) {} try { t.trkLfo.disconnect(); } catch (e) {} t.trkLfo = null; }
     ['trkLfoVolG','trkLfoPanG','trkLfoMod','trkPanNode','trkEqLow','trkEqMid','trkEqHigh','trkMeter',
-     'micSource','inputGainN','hpf','micGate','analyser','input','deckGainN','volNode','duckGain','bassLimiter',
+     'micSource','inputGainN','hpf','micGate','analyser','input','deckGainN','volNode','duckGain','bassLimiter','spaceEchoSendN',
      'delaySendN','reverbSendN','chorusSendN','flangerSendN','bitcrushSendN']
       .forEach(k => { if (t[k]) { try { t[k].disconnect(); } catch (e) {} t[k] = null; } });
     if (t.eqNodes) { t.eqNodes.forEach(n => { try { n.disconnect(); } catch (e) {} }); t.eqNodes = null; }
@@ -8974,7 +9200,7 @@
   const SAVE_KEYS = {
     common: ['name','kind','steps','pattern','volume','mute','solo','armed','group','swing','mono','noteLen','expanded',
              'eqLow','eqMid','eqHigh',
-             'delaySend','reverbSend','chorusSend','flangerSend','bitcrushSend','duckAmt',
+             'delaySend','reverbSend','chorusSend','flangerSend','bitcrushSend','spaceEchoSend','duckAmt',
              'trkLfoRate','trkLfoShape','trkLfoVolDepth','trkLfoPanDepth'],
     drum:   ['voiceType','tune'],
     bass:   ['root','wave','subLevel','sinLevel','sawLevel','cutoff','reso','env','fDecay',
@@ -9037,7 +9263,7 @@
       version: 1,
       bpm: parseFloat(bpmInput.value),
       tracks: tracks.map(serializeTrack),
-      master, delayCfg, reverbCfg, chorusCfg, flangerCfg, bitcrushCfg, compCfg, duckCfg, tapeCfg, lofiCfg, lpfCfg, hpfCfg,
+      master, delayCfg, spaceEchoCfg, reverbCfg, chorusCfg, flangerCfg, bitcrushCfg, compCfg, duckCfg, tapeCfg, lofiCfg, lpfCfg, hpfCfg,
       decks: { A: deckSnap(decks.A), B: deckSnap(decks.B), xfade: decks.xfade },
     };
   }
@@ -9069,6 +9295,16 @@
     if (delayNode)  delayNode.delayTime.value = delayCfg.sync ? computeDelaySync() : delayCfg.time;
     if (delayFb)    delayFb.gain.value        = delayCfg.fb;
     if (delayWet)   delayWet.gain.value       = delayCfg.wet;
+    if (spaceEchoH1) {
+      applySpaceEchoTimes();
+      applySpaceEchoMode();
+      if (spaceEchoFb)        spaceEchoFb.gain.value        = spaceEchoCfg.intensity;
+      if (spaceEchoWet)       spaceEchoWet.gain.value       = spaceEchoCfg.wet;
+      if (spaceEchoSat)       spaceEchoSat.curve            = makeSpaceSatCurve(spaceEchoCfg.sat);
+      if (spaceEchoTone)      spaceEchoTone.frequency.value = spaceEchoCfg.hicut;
+      if (spaceEchoWowG)      spaceEchoWowG.gain.value      = spaceEchoCfg.wow     * 0.008;
+      if (spaceEchoFlutterG)  spaceEchoFlutterG.gain.value  = spaceEchoCfg.flutter * 0.0015;
+    }
     if (reverbNode) reverbNode.buffer         = makeReverbIR(audioCtx, reverbCfg.decay);
     if (reverbWet)  reverbWet.gain.value      = reverbCfg.wet;
     if (chorusLfoL) chorusLfoL.frequency.value = chorusCfg.rate;
@@ -9109,14 +9345,14 @@
   }
   function rebuildAllUI() {
     tracksEl.innerHTML = '';
-    ['fx-racks','master','comp','ducker','delay','reverb','chorus','flanger','bitcrush','tape','lofi','lpfilter','hpfilter','mixer'].forEach(id => {
+    ['fx-racks','master','comp','ducker','delay','space-echo','reverb','chorus','flanger','bitcrush','tape','lofi','lpfilter','hpfilter','mixer'].forEach(id => {
       const node = document.getElementById(id);
       if (node) node.innerHTML = '';
     });
     rebuildTracksUI();
     buildFxRacks();
     buildMaster(); buildComp(); buildDucker();
-    buildDelay(); buildReverb();
+    buildDelay(); buildSpaceEcho(); buildReverb();
     buildChorus(); buildFlanger(); buildBitcrush(); buildTape(); buildLoFi();
     buildLPFilter(); buildHPFilter();
     applyCollapsibles();
@@ -9172,6 +9408,7 @@
     }
     if (data.master)      Object.assign(master, data.master);
     if (data.delayCfg)    Object.assign(delayCfg, data.delayCfg);
+    if (data.spaceEchoCfg) Object.assign(spaceEchoCfg, data.spaceEchoCfg);
     if (data.reverbCfg)   Object.assign(reverbCfg, data.reverbCfg);
     if (data.chorusCfg)   Object.assign(chorusCfg, data.chorusCfg);
     if (data.flangerCfg)  Object.assign(flangerCfg, data.flangerCfg);
@@ -9676,7 +9913,7 @@
     });
   }
   function applyCollapsibles() {
-    ['master','comp','ducker','delay','reverb','chorus','flanger','bitcrush','tape','lofi','lpfilter','hpfilter'].forEach(id => {
+    ['master','comp','ducker','delay','space-echo','reverb','chorus','flanger','bitcrush','tape','lofi','lpfilter','hpfilter'].forEach(id => {
       const m = document.getElementById(id);
       if (m) makeCollapsible(m);
     });
@@ -9757,7 +9994,7 @@
   rebuildTracksUI();
   buildFxRacks();
   buildMaster(); buildComp(); buildDucker();
-  buildDelay(); buildReverb();
+  buildDelay(); buildSpaceEcho(); buildReverb();
   buildChorus(); buildFlanger(); buildBitcrush(); buildTape(); buildLoFi();
   buildLPFilter(); buildHPFilter();
   applyCollapsibles();
