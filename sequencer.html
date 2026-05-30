@@ -288,17 +288,23 @@
     margin-bottom: 10px;
     font-weight: 600;
   }
-  /* In the new Track-mode layout the knobs live inside a knobs-section that
-     was moved OUT of the .track wrap, so the default `.track.expanded
-     .track-knobs` rule never fires — turn them on here. */
-  .knobs-section .track-knobs {
+  /* In the new Track-mode layout .track-knobs is moved out of the .track
+     wrap into .panel-details, so the default `.track.expanded .track-knobs`
+     rule never matches. Force it visible here, and lay it out as a column
+     of knobs-section blocks. */
+  .panel-details .track-knobs {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin: 0;
+    padding: 0;
+    border-top: none;
+  }
+  .knobs-section .knobs-row {
     display: flex;
     flex-wrap: wrap;
     align-items: flex-start;
     gap: 14px;
-    margin: 0;
-    padding-top: 0;
-    border-top: none;
   }
   @media (max-width: 900px) {
     body.mode-recording #tracks {
@@ -8982,24 +8988,41 @@
   // three are Send/Duck/Trk LFO, everything in between is voice/preset.
   function partitionKnobsForRedesign(track) {
     const k = track && track.knobsEl;
-    if (!k || track.kind === 'mic') return;
+    if (!k) return;
     const children = Array.from(k.children);
-    if (children.length < 4) return;  // not the expected shape — leave alone
-    const std    = children[0];
-    const tail   = children.slice(-3);   // Send / Duck / Trk LFO
-    const middle = children.slice(1, -3); // preset + voice-specific
-    const insSec = el('div', 'knobs-section');
-    insSec.appendChild(el('div', 'knobs-section-title', 'Instrument'));
-    middle.forEach(c => insSec.appendChild(c));
-    const chSec = el('div', 'knobs-section');
-    chSec.appendChild(el('div', 'knobs-section-title', 'Channel'));
-    chSec.appendChild(std);
-    tail.forEach(c => chSec.appendChild(c));
-    k.innerHTML = '';
-    k.appendChild(insSec);
-    k.appendChild(chSec);
-    // The details panel is the focus of the Track view now — open every
-    // group by default so the user sees the controls without hunting.
+    if (children.length === 0) return;
+
+    const makeSection = (title, items) => {
+      const sec = el('div', 'knobs-section');
+      if (title) sec.appendChild(el('div', 'knobs-section-title', title));
+      const row = el('div', 'knobs-row');
+      items.forEach(c => row.appendChild(c));
+      sec.appendChild(row);
+      return sec;
+    };
+
+    if (track.kind === 'mic') {
+      const sec = makeSection('Mic input', children);
+      k.innerHTML = '';
+      k.appendChild(sec);
+    } else if (children.length < 4) {
+      // Unexpected shape — wrap everything in a single Channel section.
+      const sec = makeSection('Channel', children);
+      k.innerHTML = '';
+      k.appendChild(sec);
+    } else {
+      // Normal shape produced by buildKnobs: std controls first, then
+      // preset + voice-specific groups, then Send / Duck / Trk LFO.
+      const std    = children[0];
+      const tail   = children.slice(-3);
+      const middle = children.slice(1, -3);
+      const insSec = makeSection('Instrument', middle);
+      const chSec  = makeSection('Channel',    [std, ...tail]);
+      k.innerHTML = '';
+      k.appendChild(insSec);
+      k.appendChild(chSec);
+    }
+    // Details panel is the focus — open every group by default.
     k.querySelectorAll('.group.collapsed').forEach(g => g.classList.remove('collapsed'));
   }
 
