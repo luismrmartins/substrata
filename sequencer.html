@@ -1381,7 +1381,7 @@
   }
 </style>
 </head>
-<body>
+<body class="mode-recording">
   <div class="layout">
     <main>
       <h1 class="title" aria-label="substrata">
@@ -10144,6 +10144,7 @@
       const mode = btn.dataset.mode;
       const oldMode = currentMode;
       currentMode = mode;
+      document.body.classList.toggle('mode-recording', mode === 'recording');
       document.body.classList.toggle('mode-mixing',  mode === 'mixing');
       document.body.classList.toggle('mode-effects', mode === 'effects');
       document.body.classList.toggle('mode-live',    mode === 'live');
