@@ -386,6 +386,25 @@
     text-overflow: ellipsis;
     max-width: 100%;
   }
+  /* Shrink the meter + vertical fader for the compact bottom mixer */
+  .panel-mixer .mix-fader   { height: 90px; }
+  .panel-mixer .mix-meter   { height: 90px; }
+  .panel-mixer .mix-eq-wrap { margin-top: 4px; padding: 4px 6px; gap: 3px; }
+  .panel-mixer .mix-strip   { margin-top: 4px; }
+  /* Master strip rendered in the bottom mixer — push it to the right
+     using margin-left:auto so it sits at the end of the row even when
+     the other channels don't fill the width. */
+  .panel-mixer .master-strip {
+    flex: 0 0 110px;
+    flex-direction: column;
+    align-items: center;
+    padding: 8px 6px;
+    border-radius: 4px;
+    margin-left: auto;
+  }
+  .panel-mixer .master-strip .track-name {
+    margin-bottom: 4px;
+  }
   @media (max-width: 1100px) {
     body.mode-recording #tracks {
       grid-template-columns: 200px 1fr;
@@ -574,11 +593,13 @@
     background: linear-gradient(to top, #2ecc40 0%, #2ecc40 55%, #ffdc00 75%, #ff4136 92%);
   }
   .master-strip { display: none; }
-  body.mode-mixing .master-strip {
+  body.mode-mixing .master-strip,
+  .panel-mixer .master-strip {
     display: flex !important;
     border-left: 3px solid var(--accent);
   }
-  body.mode-mixing .master-strip .track-name {
+  body.mode-mixing .master-strip .track-name,
+  .panel-mixer .master-strip .track-name {
     color: var(--accent);
     font-weight: 600;
     font-size: 11px;
@@ -9222,6 +9243,13 @@
         // The now-empty wrap is removed — its parts live in the panels.
         wrap.remove();
       });
+
+      // Master channel strip at the end of the bottom mixer.
+      buildMasterStrip();
+      const masterWrap = tracksEl.lastElementChild;
+      if (masterWrap && masterWrap.classList && masterWrap.classList.contains('master-strip')) {
+        mixPanel.appendChild(masterWrap);
+      }
       return;
     }
 
