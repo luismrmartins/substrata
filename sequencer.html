@@ -6727,16 +6727,20 @@
     meta.appendChild(name);
 
     const togs = el('div', 'toggles');
-    const aBtn = el('button', 'toggle arm',  'A');
-    const mBtn = el('button', 'toggle mute', 'M');
-    const sBtn = el('button', 'toggle solo', 'S');
-    const rBtn = el('button', 'toggle rnd',  'R');
-    const dBtn = el('button', 'toggle dup',  'D');
-    const gBtn = el('button', 'toggle grp',  'G' + (track.group || 0));
-    const xBtn = el('button', 'toggle rmv',  '×');
+    const aBtn  = el('button', 'toggle arm',  'A');
+    const mBtn  = el('button', 'toggle mute', 'M');
+    const sBtn  = el('button', 'toggle solo', 'S');
+    const rBtn  = el('button', 'toggle rnd',  'R');
+    const nlBtn = el('button', 'toggle nudge nudge-back', '◄');
+    const nrBtn = el('button', 'toggle nudge nudge-fwd',  '►');
+    const dBtn  = el('button', 'toggle dup',  'D');
+    const gBtn  = el('button', 'toggle grp',  'G' + (track.group || 0));
+    const xBtn  = el('button', 'toggle rmv',  '×');
     aBtn.title = 'armed (will play)';
     mBtn.title = 'mute'; sBtn.title = 'solo';
     rBtn.title = 'randomize';
+    nlBtn.title = 'nudge pattern earlier by one step';
+    nrBtn.title = 'nudge pattern later by one step';
     dBtn.title = 'duplicate track';
     gBtn.title = 'mute/solo group (0 = none, 1-8 link tracks)';
     xBtn.title = 'remove track';
@@ -6776,6 +6780,20 @@
       if (track.kind === 'mic') return;
       randomizeTrack(track);
     });
+    function nudgePattern(direction) {
+      // Mic tracks have no step pattern to nudge.
+      if (track.kind === 'mic' || !Array.isArray(track.pattern) || track.pattern.length === 0) return;
+      if (direction > 0) {
+        // forward in time: last step moves to first slot, everything else shifts right.
+        track.pattern.unshift(track.pattern.pop());
+      } else {
+        // backward in time: first step moves to last slot, everything else shifts left.
+        track.pattern.push(track.pattern.shift());
+      }
+      rebuildSteps(track);
+    }
+    nlBtn.addEventListener('click', (e) => { e.stopPropagation(); nudgePattern(-1); });
+    nrBtn.addEventListener('click', (e) => { e.stopPropagation(); nudgePattern( 1); });
     dBtn.addEventListener('click', (e) => {
       e.stopPropagation();
       duplicateTrack(track);
@@ -6793,6 +6811,8 @@
     togs.appendChild(mBtn);
     togs.appendChild(sBtn);
     togs.appendChild(rBtn);
+    togs.appendChild(nlBtn);
+    togs.appendChild(nrBtn);
     togs.appendChild(dBtn);
     togs.appendChild(gBtn);
     togs.appendChild(xBtn);
