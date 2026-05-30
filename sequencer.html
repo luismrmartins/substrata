@@ -968,15 +968,14 @@
   .live-master-eq {
     display: flex;
     align-items: center;
-    gap: 12px;
-    flex: 1;
-    min-width: 0;
+    gap: 10px;
+    flex: 0 0 auto;
   }
   .live-master-eq-row {
     display: flex;
     align-items: center;
     gap: 6px;
-    flex: 1;
+    flex: 0 0 120px;   /* compact: label + short slider + value + kill */
     min-width: 0;
   }
   .live-master-eq-row .lbl {
@@ -1001,8 +1000,9 @@
   .live-master-vol {
     display: flex;
     align-items: center;
-    gap: 6px;
-    flex: 0 0 220px;
+    gap: 8px;
+    flex: 1;
+    min-width: 0;
   }
   .live-master-vol .lbl {
     font-size: 9px;
@@ -1114,6 +1114,25 @@
     border: 1px solid var(--line);
     border-radius: 3px;
   }
+  .live-deck-vol-row {
+    display: grid;
+    grid-template-columns: 16px 1fr 36px;
+    column-gap: 6px;
+    align-items: center;
+    padding-bottom: 4px;
+    margin-bottom: 2px;
+    border-bottom: 1px solid var(--line);
+    font-size: 9px;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+  .live-deck-vol-row .lbl { color: var(--accent); font-weight: 600; }
+  .live-deck-vol-row input[type="range"] {
+    height: 12px;
+    accent-color: var(--accent);
+  }
+  .live-deck-vol-row .v { text-align: right; color: var(--text); font-variant-numeric: tabular-nums; }
   .live-deck-eq-row {
     display: grid;
     grid-template-columns: 16px 1fr 36px 16px;
@@ -4105,9 +4124,10 @@
   // Per-deck EQ buses (live mode) — tracks of each deck route their duckGain
   // into the deck's lowshelf which chains through mid (peaking) → high (highshelf)
   // → masterIn. Created in initAudio().
-  let deckABusEqLow, deckABusEqMid, deckABusEqHigh;
-  let deckBBusEqLow, deckBBusEqMid, deckBBusEqHigh;
-  const liveDeckEq = { A: { low: 0, mid: 0, high: 0 }, B: { low: 0, mid: 0, high: 0 } };
+  let deckABusEqLow, deckABusEqMid, deckABusEqHigh, deckAVolNode;
+  let deckBBusEqLow, deckBBusEqMid, deckBBusEqHigh, deckBVolNode;
+  const liveDeckEq  = { A: { low: 0, mid: 0, high: 0 }, B: { low: 0, mid: 0, high: 0 } };
+  const liveDeckVol = { A: 1, B: 1 };
   function deckBusInputFor(deck) {
     if (deck === 'A' && deckABusEqLow) return deckABusEqLow;
     if (deck === 'B' && deckBBusEqLow) return deckBBusEqLow;
@@ -4328,8 +4348,14 @@
     deckBBusEqLow  = audioCtx.createBiquadFilter(); deckBBusEqLow.type='lowshelf';   deckBBusEqLow.frequency.value  = 200;  deckBBusEqLow.gain.value  = liveDeckEq.B.low;
     deckBBusEqMid  = audioCtx.createBiquadFilter(); deckBBusEqMid.type='peaking';    deckBBusEqMid.frequency.value  = 1000; deckBBusEqMid.Q.value = 0.8; deckBBusEqMid.gain.value = liveDeckEq.B.mid;
     deckBBusEqHigh = audioCtx.createBiquadFilter(); deckBBusEqHigh.type='highshelf'; deckBBusEqHigh.frequency.value = 5000; deckBBusEqHigh.gain.value = liveDeckEq.B.high;
-    deckABusEqLow.connect(deckABusEqMid).connect(deckABusEqHigh).connect(masterIn);
-    deckBBusEqLow.connect(deckBBusEqMid).connect(deckBBusEqHigh).connect(masterIn);
+    // Per-deck volume nodes sit at the very end of each deck bus, after the
+    // EQ + before masterIn — independent of the crossfader (per-track
+    // deckGainN) so the user can dial down a deck's overall level without
+    // touching the A/B balance.
+    deckAVolNode = audioCtx.createGain(); deckAVolNode.gain.value = liveDeckVol.A;
+    deckBVolNode = audioCtx.createGain(); deckBVolNode.gain.value = liveDeckVol.B;
+    deckABusEqLow.connect(deckABusEqMid).connect(deckABusEqHigh).connect(deckAVolNode).connect(masterIn);
+    deckBBusEqLow.connect(deckBBusEqMid).connect(deckBBusEqHigh).connect(deckBVolNode).connect(masterIn);
     warmLow    = audioCtx.createBiquadFilter(); warmLow.type='lowshelf';  warmLow.frequency.value  = 180;  warmLow.gain.value  =  1.5 * master.warmth;
     warmHigh   = audioCtx.createBiquadFilter(); warmHigh.type='highshelf'; warmHigh.frequency.value = 4500; warmHigh.gain.value = -2.5 * master.warmth;
     warmShaper = audioCtx.createWaveShaper();   warmShaper.curve = makeWarmthCurve(master.warmth);
@@ -10822,6 +10848,27 @@
     const host = document.getElementById('live-deck-eq-' + deck);
     if (!host) return;
     host.innerHTML = '';
+
+    // Per-deck volume slider sits at the top, above the EQ bands. Writes to
+    // the dedicated deck-bus volume node so it's independent of the master
+    // and of the crossfader.
+    const volRow = el('div', 'live-deck-vol-row');
+    volRow.appendChild(el('span', 'lbl', 'Vol'));
+    const volSlider = el('input'); volSlider.type='range';
+    volSlider.min = 0; volSlider.max = 1.2; volSlider.step = 0.01;
+    volSlider.value = liveDeckVol[deck];
+    const volVal = el('span', 'v', Number(liveDeckVol[deck]).toFixed(2));
+    volSlider.addEventListener('input', () => {
+      const v = parseFloat(volSlider.value);
+      liveDeckVol[deck] = v;
+      volVal.textContent = v.toFixed(2);
+      const node = deck === 'A' ? deckAVolNode : deckBVolNode;
+      if (node && audioCtx) node.gain.setTargetAtTime(v, audioCtx.currentTime, 0.02);
+    });
+    volRow.appendChild(volSlider);
+    volRow.appendChild(volVal);
+    host.appendChild(volRow);
+
     [['LO','low'],['MD','mid'],['HI','high']].forEach(([label, band]) => {
       const row = el('div', 'live-deck-eq-row');
       row.appendChild(el('span', null, label));
