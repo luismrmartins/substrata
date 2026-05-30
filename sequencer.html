@@ -363,13 +363,14 @@
     border-top: 1px solid var(--line);
   }
   .mini-channel {
-    flex: 0 0 130px;
+    flex: 0 0 110px;
     display: flex;
     flex-direction: column;
+    align-items: center;
     gap: 6px;
-    padding: 8px 10px;
+    padding: 8px 6px;
     border: 1px solid var(--line);
-    border-radius: 3px;
+    border-radius: 4px;
     cursor: pointer;
     transition: border-color 80ms ease;
   }
@@ -379,34 +380,12 @@
     font-size: 11px;
     font-weight: 500;
     color: var(--text);
+    text-align: center;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+    max-width: 100%;
   }
-  .mini-channel-vol-row {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-  }
-  .mini-channel-vol {
-    flex: 1;
-    accent-color: var(--accent);
-    height: 12px;
-    cursor: ew-resize;
-  }
-  .mini-channel-vol-val {
-    font-size: 9px;
-    color: var(--muted);
-    font-variant-numeric: tabular-nums;
-    width: 28px;
-    text-align: right;
-  }
-  .mini-channel-toggles {
-    display: flex;
-    flex-direction: row;
-    gap: 3px;
-  }
-  .mini-channel-toggles .toggle { width: 20px; height: 20px; font-size: 9px; }
   @media (max-width: 1100px) {
     body.mode-recording #tracks {
       grid-template-columns: 200px 1fr;
@@ -496,7 +475,8 @@
     max-width: 86px;
   }
   body.mode-mixing .toggle { width: 18px; height: 18px; font-size: 9px; }
-  body.mode-mixing .mix-fader-wrap {
+  body.mode-mixing .mix-fader-wrap,
+  .panel-mixer .mix-fader-wrap {
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -524,7 +504,8 @@
 
   /* Mix-mode 3-band EQ + meter + master strip */
   .mix-eq-wrap, .mix-strip { display: none; }
-  body.mode-mixing .mix-eq-wrap {
+  body.mode-mixing .mix-eq-wrap,
+  .panel-mixer .mix-eq-wrap {
     display: flex;
     flex-direction: column;
     gap: 6px;
@@ -534,14 +515,16 @@
     border: 1px solid var(--line);
     border-radius: 3px;
   }
-  body.mode-mixing .mix-strip {
+  body.mode-mixing .mix-strip,
+  .panel-mixer .mix-strip {
     display: flex;
     flex-direction: row;
     align-items: center;
     gap: 4px;
     margin-top: 6px;
   }
-  body.mode-mixing .mix-fader-wrap { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+  body.mode-mixing .mix-fader-wrap,
+  .panel-mixer .mix-fader-wrap { display: flex; flex-direction: column; align-items: center; gap: 4px; }
   /* Each EQ band stacks label-and-value above the slider so the slider gets
      the full strip width — at 96px channel width that means ~80px of slider
      instead of the ~58px we'd get from a single inline row. */
@@ -9216,51 +9199,28 @@
             partitionKnobsForRedesign(t);
           }
         }
-        // The now-empty wrap is removed — its parts live in the panels.
-        wrap.remove();
-
-        // Mini-mixer strip for this track at the bottom of the view.
+        // Mini-mixer strip for this track at the bottom of the view —
+        // same channel-strip shape as Mix mode (vertical fader + meter +
+        // 3-band EQ), minus the per-channel sends row.
         const mc = el('div', 'mini-channel');
         if (t.id === selectedTrackId) mc.classList.add('selected');
         mc.addEventListener('click', (e) => {
           if (e.target.closest('button, input, select')) return;
           if (selectedTrackId !== t.id) { selectedTrackId = t.id; rebuildTracksUI(); }
         });
-        const mcName = el('div', 'mini-channel-name', t.name);
-        mc.appendChild(mcName);
-        const volRow = el('div', 'mini-channel-vol-row');
-        const volSlider = el('input');
-        volSlider.type = 'range'; volSlider.min = 0; volSlider.max = 1.2; volSlider.step = 0.01;
-        volSlider.value = t.volume;
-        volSlider.className = 'mini-channel-vol';
-        const volVal = el('span', 'mini-channel-vol-val', Number(t.volume).toFixed(2));
-        volSlider.addEventListener('input', () => {
-          const v = parseFloat(volSlider.value);
-          t.volume = v;
-          volVal.textContent = v.toFixed(2);
-          if (t.volNode && audioCtx) t.volNode.gain.setTargetAtTime(v, audioCtx.currentTime, 0.01);
-          if (t._mixFader) {
-            t._mixFader.value = v;
-            if (t._mixVolLabel) t._mixVolLabel.textContent = v.toFixed(2);
-          }
-        });
-        volRow.appendChild(volSlider);
-        volRow.appendChild(volVal);
-        mc.appendChild(volRow);
+        mc.appendChild(el('div', 'mini-channel-name', t.name));
 
-        const togs = el('div', 'mini-channel-toggles');
-        const mkBtn = (label, isOn, onClick) => {
-          const b = el('button', 'toggle', label);
-          if (isOn) b.classList.add('on');
-          b.addEventListener('click', (e) => { e.stopPropagation(); onClick(); rebuildTracksUI(); });
-          return b;
-        };
-        togs.appendChild(mkBtn('A', t.armed, () => setArmedAcross(t, !t.armed, false)));
-        togs.appendChild(mkBtn('M', t.mute,  () => setMuteAcross(t, !t.mute, false)));
-        togs.appendChild(mkBtn('S', t.solo,  () => setSoloAcross(t, !t.solo)));
-        mc.appendChild(togs);
-
+        // Move the EQ wrap and the meter+fader strip out of the .track wrap
+        // (built by buildTrack) into this mini-channel. The sends row stays
+        // in the wrap (and will be discarded when we remove it).
+        const mixEq    = wrap.querySelector('.mix-eq-wrap');
+        const mixStrip = wrap.querySelector('.mix-strip');
+        if (mixEq)    mc.appendChild(mixEq);
+        if (mixStrip) mc.appendChild(mixStrip);
         mixPanel.appendChild(mc);
+
+        // The now-empty wrap is removed — its parts live in the panels.
+        wrap.remove();
       });
       return;
     }
