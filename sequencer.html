@@ -1656,6 +1656,7 @@
     letter-spacing: 0.5px;
   }
   .knob input[type="range"] { width: 60px; accent-color: var(--text); height: 12px; }
+  .knob .rotary { width: 24px; height: 24px; }
   .knob input[type="number"] {
     width: 42px;
     background: transparent;
@@ -1719,6 +1720,7 @@
   .group.eq-band .group-row { flex-direction: column; align-items: stretch; }
   .group.eq-band .knob { flex-direction: column; align-items: stretch; gap: 2px; }
   .group.eq-band .knob input[type="range"] { width: 50px; }
+  .group.eq-band .knob .rotary { width: 22px; height: 22px; }
   .eq-head { display: flex; justify-content: center; }
   .toggle.eq-on { width: 18px; height: 14px; font-size: 9px; }
 
@@ -4868,22 +4870,27 @@
   function knob(label, min, max, step, val, onChange, fmt) {
     const w = el('div', 'knob');
     w.appendChild(el('label', null, label));
-    const r = el('input'); r.type='range'; r.min=min; r.max=max; r.step=step; r.value=val;
     const v = el('span', 'v', fmt(val));
-    r.addEventListener('input', () => {
-      const x = parseFloat(r.value);
-      v.textContent = fmt(x); onChange(x);
-    });
+    const quantize = (x) => {
+      if (!step) return x;
+      const snapped = Math.round((x - min) / step) * step + min;
+      return Math.max(min, Math.min(max, snapped));
+    };
+    const dial = makeRotary(min, max, val, (raw) => {
+      const x = quantize(raw);
+      v.textContent = fmt(x);
+      onChange(x);
+    }, fmt);
     // Try to infer which track property this knob writes to from the
     // onChange closure source — used by the morph slider to live-update
-    // every affected slider without rebuilding the panel.
+    // every affected dial without rebuilding the panel.
     try {
       const src = onChange.toString();
-      const m = src.match(/track\.([\w$]+)\s*=\s*v\b/) || src.match(/t\.([\w$]+)\s*=\s*v\b/);
-      if (m) r.dataset.prop = m[1];
+      const m = src.match(/track\.([\w$]+)\s*=\s*(?:x|v)\b/) || src.match(/t\.([\w$]+)\s*=\s*(?:x|v)\b/);
+      if (m) dial.dataset.prop = m[1];
     } catch (e) {}
-    r._refresh = (newVal) => { r.value = newVal; v.textContent = fmt(parseFloat(r.value)); };
-    w.appendChild(r); w.appendChild(v); return w;
+    dial._refresh = (newVal) => { dial._setValue(newVal); v.textContent = fmt(newVal); };
+    w.appendChild(dial); w.appendChild(v); return w;
   }
   function numField(label, min, max, val, onChange) {
     const w = el('div', 'knob');
@@ -10268,7 +10275,7 @@
 
   function refreshMorphableKnobs(track, mergedParams) {
     const inputs = document.querySelectorAll(
-      '.panel-details input[data-prop], .panel-sequencer input[data-prop]'
+      '.panel-details [data-prop], .panel-sequencer [data-prop]'
     );
     inputs.forEach(input => {
       const prop = input.dataset.prop;
@@ -10277,7 +10284,7 @@
       const v = track[prop];
       if (typeof v !== 'number') return;
       if (input._refresh) input._refresh(v);
-      else input.value = v;
+      else if (input.tagName === 'INPUT') input.value = v;
     });
   }
 
