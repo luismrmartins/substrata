@@ -1077,34 +1077,29 @@
     gap: 4px;
     min-height: 80px;
   }
-  /* Two-row channel strip — top row: name + Sections; bottom row: Tools,
-     Volume, Morphs side by side. */
+  /* Two-row channel strip on a shared grid: column 1 is "name / tools",
+     column 2 is "sections / volume" (so the S of Sections and the V of
+     Volume line up at the same x), column 3 holds Morphs. */
   body.mode-live .track {
-    display: flex !important;
-    flex-direction: column;
-    align-items: stretch;
-    gap: 8px;
+    display: grid !important;
+    grid-template-columns: minmax(120px, max-content) minmax(0, 1fr) auto;
+    grid-template-areas:
+      "name  sections ."
+      "tools volume   morphs";
+    column-gap: 18px;
+    row-gap: 8px;
+    align-items: start;
     border: 1px solid var(--line);
     border-radius: 3px;
     padding: 8px 10px;
-    grid-template-columns: unset;
     overflow: hidden;
     width: 100%;
   }
-  body.mode-live .live-row-1 {
-    display: flex;
-    flex-direction: row;
-    align-items: center;
-    gap: 14px;
-    flex-wrap: wrap;
-  }
-  body.mode-live .live-row-2 {
-    display: flex;
-    flex-direction: row;
-    align-items: flex-start;
-    gap: 18px;
-    flex-wrap: wrap;
-  }
+  body.mode-live .live-cell-name     { grid-area: name; align-self: center; }
+  body.mode-live .live-cell-sections { grid-area: sections; }
+  body.mode-live .live-cell-tools    { grid-area: tools; }
+  body.mode-live .live-cell-volume   { grid-area: volume; }
+  body.mode-live .live-cell-morphs   { grid-area: morphs; }
   body.mode-live .live-sections-inline {
     display: flex;
     flex-direction: row;
@@ -9847,27 +9842,26 @@
           morphRow.insertBefore(el('div', 'live-feature-label', 'Morphs'), morphRow.firstChild);
         }
 
-        // Build the pattern-bank selector inline next to the track name,
-        // then reorganise the strip into two rows: row 1 = name + Sections;
-        // row 2 = Tools + Volume + Morphs.
+        // Build the Sections inline block (label + banks) for non-mic tracks.
         const nameEl = wrap.querySelector('.track-name');
-        const row1 = el('div', 'live-row-1');
-        const row2 = el('div', 'live-row-2');
-        if (nameEl) row1.appendChild(nameEl);
+        let sectionsBlock = null;
         if (t.kind !== 'mic') {
-          const sectionsBlock = el('div', 'live-sections-inline');
+          sectionsBlock = el('div', 'live-sections-inline');
           sectionsBlock.appendChild(el('div', 'live-feature-label', 'Sections'));
           sectionsBlock.appendChild(buildPatternBankSelector(t));
-          row1.appendChild(sectionsBlock);
         }
-        if (toolsWrap) row2.appendChild(toolsWrap);
-        if (volRow)    row2.appendChild(volRow);
-        if (morphRow)  row2.appendChild(morphRow);
 
-        // Replace the wrap's contents with the new two-row layout.
+        // Replace the wrap with a CSS-grid layout so the columns line up:
+        //   row 1: [name]    [Sections]    .
+        //   row 2: [Tools]   [Volume]      [Morphs]
+        // The shared column 1 ensures the "S" of Sections and the "V" of
+        // Volume start at the same x.
         wrap.innerHTML = '';
-        wrap.appendChild(row1);
-        wrap.appendChild(row2);
+        if (nameEl)        { nameEl.classList.add('live-cell-name');         wrap.appendChild(nameEl); }
+        if (sectionsBlock) { sectionsBlock.classList.add('live-cell-sections'); wrap.appendChild(sectionsBlock); }
+        if (toolsWrap)     { toolsWrap.classList.add('live-cell-tools');     wrap.appendChild(toolsWrap); }
+        if (volRow)        { volRow.classList.add('live-cell-volume');       wrap.appendChild(volRow); }
+        if (morphRow)      { morphRow.classList.add('live-cell-morphs');     wrap.appendChild(morphRow); }
         const target = t.deck === 'B' ? deckBEl : deckAEl;
         target.appendChild(wrap);
       });
