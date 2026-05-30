@@ -217,6 +217,88 @@
   body.mode-mixing .mic-control,
   body.mode-mixing .mixer,
   body.mode-mixing .add-row { display: none !important; }
+
+  /* ---- Track mode (recording): instruments left | sequencer + details
+     right. The selected instrument drives what shows on the right. */
+  body.mode-recording #tracks {
+    display: grid;
+    grid-template-columns: 240px minmax(0, 1fr);
+    grid-template-rows: auto 1fr;
+    grid-template-areas:
+      "instruments sequencer"
+      "instruments details";
+    gap: 16px;
+    align-items: start;
+  }
+  .panel-instruments { grid-area: instruments; display: flex; flex-direction: column; gap: 4px; }
+  .panel-sequencer   { grid-area: sequencer; min-width: 0; }
+  .panel-details     { grid-area: details; min-width: 0; display: flex; flex-direction: column; gap: 10px; }
+  .panel-empty {
+    font-size: 11px;
+    color: var(--muted);
+    padding: 14px 12px;
+    border: 1px dashed var(--line);
+    border-radius: 3px;
+    text-align: center;
+  }
+  .instrument-item {
+    border: 1px solid var(--line);
+    border-radius: 3px;
+    padding: 8px 10px;
+    cursor: pointer;
+    transition: border-color 80ms ease, background 80ms ease;
+  }
+  .instrument-item:hover { border-color: var(--muted); }
+  .instrument-item.selected {
+    border-color: var(--accent);
+    background: rgba(255, 86, 35, 0.05);
+  }
+  .instrument-item .track-meta {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 6px;
+  }
+  .instrument-item .track-name {
+    font-size: 12px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .instrument-item .track-name .chev { display: none; }
+  .instrument-item .toggles {
+    display: flex;
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 3px;
+  }
+  .instrument-item .toggle { width: 22px; height: 22px; font-size: 9px; }
+  .panel-sequencer .steps-row,
+  .panel-sequencer .mic-control { margin: 0; }
+  .knobs-section {
+    padding: 12px;
+    border: 1px solid var(--line);
+    border-radius: 3px;
+  }
+  .knobs-section-title {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    color: var(--accent);
+    margin-bottom: 10px;
+    font-weight: 600;
+  }
+  .knobs-section .track-knobs { margin: 0; }
+  @media (max-width: 900px) {
+    body.mode-recording #tracks {
+      grid-template-columns: 1fr;
+      grid-template-areas:
+        "instruments"
+        "sequencer"
+        "details";
+    }
+  }
+
   /* Mix mode — vertical channel strips. Master is pinned to the right of
      the viewport via a grid + sticky column; every other channel stacks in
      a wrapping flex grid on the left. */
@@ -3394,6 +3476,9 @@
   };
 
   let nextTrackId = 1;
+  // Track-mode currently-selected instrument (the one whose sequencer +
+  // controls are shown in the right-hand panels).
+  let selectedTrackId = null;
   const tracks = [];
 
   function defaultName(kind) {
@@ -8863,6 +8948,7 @@
     const t = makeTrack(kind, overrides);
     tracks.push(t);
     if (audioCtx) initTrackAudio(t);
+    selectedTrackId = t.id;  // auto-focus the newly added instrument
     rebuildTracksUI();
     rebuildDuckerSourceOptions();
   }
@@ -8872,12 +8958,103 @@
     if (idx >= 0) tracks.splice(idx, 1);
     if (duckCfg.sourceIndex === idx) duckCfg.sourceIndex = -1;
     else if (duckCfg.sourceIndex > idx) duckCfg.sourceIndex--;
+    if (selectedTrackId === t.id) {
+      selectedTrackId = tracks.length ? tracks[Math.min(idx, tracks.length - 1)].id : null;
+    }
     rebuildTracksUI();
     rebuildDuckerSourceOptions();
   }
+  // Reorganise the children of a track's knobs container into two visual
+  // sections: "Instrument" (preset + voice-specific groups) and "Channel"
+  // (Stp/Vol/Swg/Mono + Sends + Duck + Track LFO). Relies on the fixed order
+  // produced by buildKnobs — first child is the std controls group, last
+  // three are Send/Duck/Trk LFO, everything in between is voice/preset.
+  function partitionKnobsForRedesign(track) {
+    const k = track && track.knobsEl;
+    if (!k || track.kind === 'mic') return;
+    const children = Array.from(k.children);
+    if (children.length < 4) return;  // not the expected shape — leave alone
+    const std    = children[0];
+    const tail   = children.slice(-3);   // Send / Duck / Trk LFO
+    const middle = children.slice(1, -3); // preset + voice-specific
+    const insSec = el('div', 'knobs-section');
+    insSec.appendChild(el('div', 'knobs-section-title', 'Instrument'));
+    middle.forEach(c => insSec.appendChild(c));
+    const chSec = el('div', 'knobs-section');
+    chSec.appendChild(el('div', 'knobs-section-title', 'Channel'));
+    chSec.appendChild(std);
+    tail.forEach(c => chSec.appendChild(c));
+    k.innerHTML = '';
+    k.appendChild(insSec);
+    k.appendChild(chSec);
+    // The details panel is the focus of the Track view now — open every
+    // group by default so the user sees the controls without hunting.
+    k.querySelectorAll('.group.collapsed').forEach(g => g.classList.remove('collapsed'));
+  }
+
   function rebuildTracksUI() {
     tracksEl.innerHTML = '';
     _masterMeterFill = null;
+
+    if (currentMode === 'recording') {
+      // Three-zone layout: instruments column + sequencer panel + details panel.
+      const instPanel = el('aside', 'panel-instruments');
+      const seqPanel  = el('section', 'panel-sequencer');
+      const detPanel  = el('section', 'panel-details');
+      tracksEl.appendChild(instPanel);
+      tracksEl.appendChild(seqPanel);
+      tracksEl.appendChild(detPanel);
+
+      if (tracks.length === 0) {
+        instPanel.appendChild(el('div', 'panel-empty',
+          'No tracks yet — use the + buttons above to add an instrument.'));
+        seqPanel.appendChild(el('div', 'panel-empty', 'Add a track to start sequencing.'));
+        return;
+      }
+
+      // Make sure something is selected.
+      if (!tracks.some(t => t.id === selectedTrackId)) {
+        selectedTrackId = tracks[0].id;
+      }
+
+      tracks.forEach(t => {
+        buildTrack(t);                              // appends a .track wrap to tracksEl
+        const wrap  = tracksEl.lastElementChild;
+        const meta  = wrap.querySelector('.track-meta');
+        const steps = wrap.querySelector('.steps-row');
+        const mic   = wrap.querySelector('.mic-control');
+        const knobs = wrap.querySelector('.track-knobs');
+
+        // Move the meta (name + toggles) into an instrument-list item.
+        const item = el('div', 'instrument-item');
+        item.dataset.trackId = t.id;
+        if (t.id === selectedTrackId) item.classList.add('selected');
+        if (meta) item.appendChild(meta);
+        instPanel.appendChild(item);
+        item.addEventListener('click', (e) => {
+          // Let buttons / inputs inside the meta keep their existing behaviour.
+          if (e.target.closest('button, input, select, textarea')) return;
+          if (selectedTrackId !== t.id) {
+            selectedTrackId = t.id;
+            rebuildTracksUI();
+          }
+        });
+
+        // For the selected track only, move the sequencer + knobs into their
+        // panels and partition the knobs into Instrument / Channel sections.
+        if (t.id === selectedTrackId) {
+          if (steps) seqPanel.appendChild(steps);
+          if (mic)   seqPanel.appendChild(mic);
+          if (knobs) {
+            detPanel.appendChild(knobs);
+            partitionKnobsForRedesign(t);
+          }
+        }
+        // The now-empty wrap is removed — its parts live in the panels.
+        wrap.remove();
+      });
+      return;
+    }
 
     if (currentMode === 'live') {
       // Two-deck layout: per-deck container, channels stack vertically inside.
@@ -9971,10 +10148,9 @@
       document.body.classList.toggle('mode-effects', mode === 'effects');
       document.body.classList.toggle('mode-live',    mode === 'live');
       modeBtns.forEach(b => b.classList.toggle('on', b === btn));
-      // Live and Mix modes use different DOM layouts (per-deck containers
-      // for Live, left+right zones for Mix) — rebuild whenever we cross
-      // a mode boundary that changes structure.
-      const structural = m => m === 'live' || m === 'mixing';
+      // Live, Mix and Track modes each use their own DOM layouts — rebuild
+      // whenever we cross a mode boundary that changes structure.
+      const structural = m => m === 'live' || m === 'mixing' || m === 'recording';
       if (structural(mode) || structural(oldMode)) rebuildTracksUI();
     });
   });
