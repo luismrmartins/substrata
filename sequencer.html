@@ -7405,6 +7405,11 @@
           if (!p) return;
           applyPresetToTrack(track, p);
           buildKnobs(track);
+          // In Track mode the knobs panel is partitioned into Instrument /
+          // Channel sections and the std controls are lifted to the sequencer
+          // header. buildKnobs above just rebuilt the flat shape, so refresh
+          // the whole track UI to put everything back in place.
+          if (currentMode === 'recording') rebuildTracksUI();
         });
         const saveBtn = el('button', 'mic-btn', 'Save');
         saveBtn.title = 'save current sound as a user preset (shift-click to save as new)';
