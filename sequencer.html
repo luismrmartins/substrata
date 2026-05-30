@@ -947,6 +947,102 @@
     flex-wrap: wrap;
     margin-top: 4px;
   }
+  /* Live master bar — bottom of the live controls. Master EQ + volume so
+     the user can shape the whole mix during a live set without leaving the
+     Live tab. */
+  .live-master-row {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding-top: 10px;
+    border-top: 1px solid var(--line);
+  }
+  .live-master-label {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    color: var(--accent);
+    font-weight: 600;
+    flex: 0 0 auto;
+  }
+  .live-master-eq {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex: 1;
+    min-width: 0;
+  }
+  .live-master-eq-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex: 1;
+    min-width: 0;
+  }
+  .live-master-eq-row .lbl {
+    font-size: 9px;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    width: 16px;
+  }
+  .live-master-eq-row input[type="range"] {
+    flex: 1;
+    accent-color: var(--text);
+    height: 12px;
+  }
+  .live-master-eq-row .v {
+    font-size: 9px;
+    color: var(--muted);
+    font-variant-numeric: tabular-nums;
+    width: 32px;
+    text-align: right;
+  }
+  .live-master-vol {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex: 0 0 220px;
+  }
+  .live-master-vol .lbl {
+    font-size: 9px;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    width: 28px;
+  }
+  .live-master-vol input[type="range"] {
+    flex: 1;
+    accent-color: var(--accent);
+    height: 12px;
+    cursor: ew-resize;
+  }
+  .live-master-vol .v {
+    font-size: 9px;
+    color: var(--muted);
+    font-variant-numeric: tabular-nums;
+    width: 32px;
+    text-align: right;
+  }
+  .live-master-kill {
+    background: transparent;
+    border: 1px solid var(--cell-border);
+    color: var(--muted);
+    font: inherit;
+    font-size: 8px;
+    width: 16px;
+    height: 16px;
+    line-height: 14px;
+    padding: 0;
+    cursor: pointer;
+    text-align: center;
+  }
+  .live-master-kill:hover { border-color: var(--text); color: var(--text); }
+  .live-master-kill.on {
+    background: var(--accent);
+    color: #fff;
+    border-color: var(--accent);
+  }
   .live-xfade-row {
     display: flex;
     align-items: center;
@@ -1822,6 +1918,7 @@
           <span class="live-xfade-label">B</span>
           <span class="live-xfade-readout" id="live-xfade-readout">A 1.00 · B 1.00</span>
         </div>
+        <div class="live-master-row" id="live-master-bar"></div>
         </div>
       </div>
       <div id="tracks" class="tracks"></div>
@@ -10762,6 +10859,74 @@
     });
   }
   buildDeckEq('A'); buildDeckEq('B');
+
+  // ---- Live master bar (EQ + volume for the whole mix) ----
+  function buildLiveMasterBar() {
+    const host = document.getElementById('live-master-bar');
+    if (!host) return;
+    host.innerHTML = '';
+    host.appendChild(el('span', 'live-master-label', 'Master'));
+
+    const eqWrap = el('div', 'live-master-eq');
+    const fmt = v => (v > 0 ? '+' : '') + Number(v).toFixed(1);
+
+    const makeBand = (label, prop, getNode) => {
+      const row = el('div', 'live-master-eq-row');
+      row.appendChild(el('span', 'lbl', label));
+      const r = el('input'); r.type='range'; r.min=-15; r.max=15; r.step=0.5;
+      r.value = master[prop];
+      const valEl = el('span', 'v', fmt(master[prop]));
+      let saved = master[prop];
+      let killed = false;
+      const kill = el('button', 'live-master-kill', '✕');
+      kill.title = 'Kill this band (-15 dB)';
+      const apply = (v) => {
+        master[prop] = v;
+        valEl.textContent = fmt(v);
+        const n = getNode();
+        if (n && audioCtx) n.gain.setTargetAtTime(v, audioCtx.currentTime, 0.02);
+      };
+      r.addEventListener('input', () => {
+        const v = parseFloat(r.value);
+        if (killed) { killed = false; kill.classList.remove('on'); }
+        saved = v;
+        apply(v);
+      });
+      kill.addEventListener('click', (e) => {
+        e.preventDefault();
+        killed = !killed;
+        kill.classList.toggle('on', killed);
+        if (killed) { saved = parseFloat(r.value); r.value = -15; }
+        else { r.value = saved; }
+        apply(parseFloat(r.value));
+      });
+      row.appendChild(r);
+      row.appendChild(valEl);
+      row.appendChild(kill);
+      return row;
+    };
+    eqWrap.appendChild(makeBand('LO',  'low',  () => eqLow));
+    eqWrap.appendChild(makeBand('MD',  'mid',  () => eqMid));
+    eqWrap.appendChild(makeBand('HI',  'high', () => eqHigh));
+    host.appendChild(eqWrap);
+
+    const volWrap = el('div', 'live-master-vol');
+    volWrap.appendChild(el('span', 'lbl', 'Vol'));
+    const volSlider = el('input');
+    volSlider.type='range'; volSlider.min=0; volSlider.max=1.2; volSlider.step=0.01;
+    volSlider.value = master.vol;
+    const volVal = el('span', 'v', Number(master.vol).toFixed(2));
+    volSlider.addEventListener('input', () => {
+      const v = parseFloat(volSlider.value);
+      master.vol = v;
+      volVal.textContent = v.toFixed(2);
+      if (masterOut && audioCtx) masterOut.gain.setTargetAtTime(v, audioCtx.currentTime, 0.01);
+    });
+    volWrap.appendChild(volSlider);
+    volWrap.appendChild(volVal);
+    host.appendChild(volWrap);
+  }
+  buildLiveMasterBar();
 
   // ---------- Live cue ----------
   // A staging list — user adds project files, then sends each to Deck A or
