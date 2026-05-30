@@ -696,6 +696,46 @@
   /* ----- Live mode: two-deck side-by-side live mixer ----- */
   .live-controls { display: none; }
   .live-vol-row { display: none; }
+  .live-morph-row { display: none; }
+
+  /* ---- A / B / C morph (per-track) ---- */
+  .morph-ticks {
+    display: flex;
+    justify-content: space-between;
+    margin: 4px 2px 2px;
+    font-size: 9px;
+    color: var(--muted);
+    letter-spacing: 1px;
+  }
+  .morph-slot {
+    text-align: center;
+    width: 14px;
+  }
+  .morph-slot.has {
+    color: var(--accent);
+    font-weight: 600;
+  }
+  .morph-slider {
+    width: 100%;
+    accent-color: var(--accent);
+    height: 14px;
+    cursor: ew-resize;
+  }
+  .morph-buttons {
+    display: flex;
+    gap: 6px;
+    margin-top: 8px;
+  }
+  .morph-buttons .small { flex: 1; }
+  body.mode-live .live-morph-row {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    margin-top: 4px;
+    width: 90px;
+    flex-shrink: 0;
+  }
+  body.mode-live .live-morph-row .morph-ticks { margin: 0 2px; }
   body.mode-live .add-row,
   body.mode-live .mixer,
   body.mode-live .steps-row,
@@ -3685,6 +3725,11 @@
       eqLow: 0, eqMid: 0, eqHigh: 0,
       trkLfoRate: 0.5, trkLfoShape: 'sine',
       trkLfoVolDepth: 0, trkLfoPanDepth: 0,
+      // Per-track A / B / C morph states — saved with the project, loaded
+      // back as snapshots of the instrument + channel params at the time
+      // of save. The slider lerps between them at playback.
+      morphStates: { A: null, B: null, C: null },
+      morphPos: 0,
       expanded: true,
       _prevFreq: null, _prevSlide: false,
       nextStep: 0, nextNoteTime: 0,
@@ -7112,6 +7157,27 @@
     track._liveVolVal = liveVolVal;
     wrap.appendChild(liveVolRow);
 
+    // Per-track A/B/C morph row — visible only in Live mode (CSS-hidden
+    // elsewhere). The slider drives applyMorph; small slot dots show
+    // which slots have a saved state.
+    const liveMorphRow = el('div', 'live-morph-row');
+    const liveMorphTicks = el('div', 'morph-ticks');
+    ['A','B','C'].forEach(slot => {
+      const has = !!(track.morphStates && track.morphStates[slot]);
+      liveMorphTicks.appendChild(el('span', 'morph-slot' + (has ? ' has' : ''), slot));
+    });
+    liveMorphRow.appendChild(liveMorphTicks);
+    const liveMorphSlider = el('input', 'morph-slider');
+    liveMorphSlider.type = 'range'; liveMorphSlider.min = 0; liveMorphSlider.max = 2; liveMorphSlider.step = 0.01;
+    liveMorphSlider.value = track.morphPos || 0;
+    liveMorphSlider.addEventListener('input', () => {
+      applyMorph(track, parseFloat(liveMorphSlider.value));
+      // keep the Track-tab slider (if visible) in sync
+      if (track._morphSlider) track._morphSlider.value = liveMorphSlider.value;
+    });
+    liveMorphRow.appendChild(liveMorphSlider);
+    wrap.appendChild(liveMorphRow);
+
     if (track.kind === 'mic') {
       const mic = el('div', 'mic-control');
       const btn = el('button', null, track.enabled ? 'Live' : 'Enable Mic');
@@ -9193,6 +9259,131 @@
     _resizeMixerTimer = requestAnimationFrame(() => resizeMixerStrips());
   });
 
+  // ---------- Per-track A / B / C morph ----------
+  // Each track stores up to three snapshots of its instrument + channel
+  // parameters. A slider lerps between A→B (pos 0..1) and B→C (pos 1..2)
+  // so the user can morph patches live. States are saved with the project,
+  // not pulled from a global preset bank.
+  const MORPH_EXCLUDE = new Set([
+    'name','kind','voice','voiceType','wave','waveA','waveB',
+    'steps','pattern','expanded',
+    'mute','solo','armed','mono','group','noteLen',
+    'sampleFile','buffer','deviceId','enabled','eqBands',
+    'scale','seventh','ninth','subOctave','lfoShape','trkLfoShape','div','sync',
+    'morphStates','morphPos','deck','_pendingMute','_pendingArmed'
+  ]);
+
+  function captureMorphState(track) {
+    const keys = (SAVE_KEYS.common || []).concat(SAVE_KEYS[track.kind] || []);
+    const out = {};
+    for (const k of keys) {
+      if (MORPH_EXCLUDE.has(k)) continue;
+      const v = track[k];
+      if (typeof v === 'number' || typeof v === 'boolean' || typeof v === 'string') {
+        out[k] = v;
+      }
+    }
+    return out;
+  }
+
+  function lerpMorphStates(a, b, t) {
+    const merged = {};
+    const keys = new Set([...Object.keys(a), ...Object.keys(b)]);
+    for (const k of keys) {
+      const av = a[k];
+      const bv = b[k];
+      if (typeof av === 'number' && typeof bv === 'number') {
+        merged[k] = av + (bv - av) * t;
+      } else {
+        // For non-numeric values, switch at the midpoint.
+        merged[k] = (t < 0.5 ? av : bv);
+      }
+    }
+    return merged;
+  }
+
+  function applyMorph(track, pos) {
+    track.morphPos = pos;
+    const ms = track.morphStates;
+    if (!ms) return;
+    let merged = null;
+    if (pos <= 1) {
+      if (ms.A && ms.B)      merged = lerpMorphStates(ms.A, ms.B, pos);
+      else if (ms.B)         merged = { ...ms.B };
+      else if (ms.A)         merged = { ...ms.A };
+    } else {
+      const t = pos - 1;
+      if (ms.B && ms.C)      merged = lerpMorphStates(ms.B, ms.C, t);
+      else if (ms.C)         merged = { ...ms.C };
+      else if (ms.B)         merged = { ...ms.B };
+    }
+    if (!merged) return;
+    // Assign morphed params back to the track.
+    Object.assign(track, merged);
+    // Re-apply the channel-side params to live audio nodes so changes are
+    // heard immediately. Instrument params (cutoff, ADSR, etc.) take effect
+    // on the next note trigger, which is the right behaviour for a morph.
+    if (!audioCtx) return;
+    const ct = audioCtx.currentTime;
+    const ramp = 0.03;
+    if (track.volNode    && merged.volume       !== undefined) track.volNode.gain.setTargetAtTime(merged.volume,        ct, ramp);
+    if (track.trkEqLow   && merged.eqLow        !== undefined) track.trkEqLow.gain.setTargetAtTime(merged.eqLow,        ct, ramp);
+    if (track.trkEqMid   && merged.eqMid        !== undefined) track.trkEqMid.gain.setTargetAtTime(merged.eqMid,        ct, ramp);
+    if (track.trkEqHigh  && merged.eqHigh       !== undefined) track.trkEqHigh.gain.setTargetAtTime(merged.eqHigh,      ct, ramp);
+    if (track.delaySendN    && merged.delaySend    !== undefined) track.delaySendN.gain.setTargetAtTime(merged.delaySend,        ct, ramp);
+    if (track.reverbSendN   && merged.reverbSend   !== undefined) track.reverbSendN.gain.setTargetAtTime(merged.reverbSend,      ct, ramp);
+    if (track.chorusSendN   && merged.chorusSend   !== undefined) track.chorusSendN.gain.setTargetAtTime(merged.chorusSend,      ct, ramp);
+    if (track.flangerSendN  && merged.flangerSend  !== undefined) track.flangerSendN.gain.setTargetAtTime(merged.flangerSend,    ct, ramp);
+    if (track.bitcrushSendN && merged.bitcrushSend !== undefined) track.bitcrushSendN.gain.setTargetAtTime(merged.bitcrushSend,  ct, ramp);
+    if (track.spaceEchoSendN&& merged.spaceEchoSend!== undefined) track.spaceEchoSendN.gain.setTargetAtTime(merged.spaceEchoSend, ct, ramp);
+    if (track.trkLfo && merged.trkLfoRate !== undefined) track.trkLfo.frequency.setTargetAtTime(merged.trkLfoRate, ct, ramp);
+  }
+
+  function saveMorphSlot(track, slot) {
+    if (!track.morphStates) track.morphStates = { A: null, B: null, C: null };
+    track.morphStates[slot] = captureMorphState(track);
+  }
+
+  function buildMorphSection(track) {
+    const sec = el('div', 'knobs-section morph-section');
+    const head = el('div', 'knobs-section-head');
+    head.appendChild(el('div', 'knobs-section-name', track.name));
+    head.appendChild(el('div', 'knobs-section-title', 'Morph'));
+    sec.appendChild(head);
+
+    const slot = (label) => {
+      const has = !!(track.morphStates && track.morphStates[label]);
+      return el('span', 'morph-slot' + (has ? ' has' : ''), label);
+    };
+
+    const tickRow = el('div', 'morph-ticks');
+    tickRow.appendChild(slot('A'));
+    tickRow.appendChild(slot('B'));
+    tickRow.appendChild(slot('C'));
+    sec.appendChild(tickRow);
+
+    const slider = el('input', 'morph-slider');
+    slider.type = 'range'; slider.min = 0; slider.max = 2; slider.step = 0.01;
+    slider.value = track.morphPos || 0;
+    slider.addEventListener('input', () => applyMorph(track, parseFloat(slider.value)));
+    sec.appendChild(slider);
+    track._morphSlider = slider;
+
+    const btnRow = el('div', 'morph-buttons');
+    ['A','B','C'].forEach(label => {
+      const b = el('button', 'small', 'Save ' + label);
+      b.title = 'Snapshot the current instrument + channel state into slot ' + label;
+      b.addEventListener('click', () => {
+        saveMorphSlot(track, label);
+        rebuildTracksUI();   // refresh the slot dots to show this slot is now filled
+      });
+      btnRow.appendChild(b);
+    });
+    sec.appendChild(btnRow);
+
+    return sec;
+  }
+
   // Reorganise the children of a track's knobs container into two visual
   // sections: "Instrument" (preset + voice-specific groups) and "Channel"
   // (Stp/Vol/Swg/Mono + Sends + Duck + Track LFO). Relies on the fixed order
@@ -9239,6 +9430,10 @@
     }
     // Details panel is the focus — open every group by default.
     k.querySelectorAll('.group.collapsed').forEach(g => g.classList.remove('collapsed'));
+    // Morph slider lives below the channel section, separated by the same
+    // divider rule that already styles knobs-section + knobs-section.
+    const morphSec = buildMorphSection(track);
+    if (morphSec) k.appendChild(morphSec);
   }
 
   function rebuildTracksUI() {
@@ -9694,7 +9889,8 @@
     common: ['name','kind','steps','pattern','volume','mute','solo','armed','group','swing','mono','noteLen','expanded',
              'eqLow','eqMid','eqHigh',
              'delaySend','reverbSend','chorusSend','flangerSend','bitcrushSend','spaceEchoSend','duckAmt',
-             'trkLfoRate','trkLfoShape','trkLfoVolDepth','trkLfoPanDepth'],
+             'trkLfoRate','trkLfoShape','trkLfoVolDepth','trkLfoPanDepth',
+             'morphStates','morphPos'],
     drum:   ['voiceType','tune'],
     bass:   ['root','wave','subLevel','sinLevel','sawLevel','cutoff','reso','env','fDecay',
              'attack','decay','sustain','release',
