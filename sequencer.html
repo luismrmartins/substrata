@@ -1244,7 +1244,7 @@
   .live-deck-eq {
     display: flex;
     flex-direction: column;
-    gap: 5px;
+    gap: 6px;
     margin-top: 4px;
     padding: 6px 8px;
     border: 1px solid var(--line);
@@ -1252,11 +1252,10 @@
   }
   .live-deck-vol-row {
     display: grid;
-    grid-template-columns: 16px 1fr 36px;
-    column-gap: 6px;
+    grid-template-columns: 24px 1fr 36px;
+    column-gap: 8px;
     align-items: center;
-    padding-bottom: 4px;
-    margin-bottom: 2px;
+    padding-bottom: 6px;
     border-bottom: 1px solid var(--line);
     font-size: 9px;
     color: var(--muted);
@@ -1269,6 +1268,16 @@
     accent-color: var(--accent);
   }
   .live-deck-vol-row .v { text-align: right; color: var(--text); font-variant-numeric: tabular-nums; }
+  /* All three EQ bands sit in one horizontal row — eliminates the dead
+     space between the dial and the value/kill that the stacked layout had. */
+  .live-deck-eq-bands {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    flex-wrap: nowrap;
+  }
   .live-deck-eq-row {
     display: flex;
     align-items: center;
@@ -1277,8 +1286,10 @@
     color: var(--muted);
     text-transform: uppercase;
     letter-spacing: 0.5px;
+    flex: 1 1 0;
+    min-width: 0;
   }
-  .live-deck-eq-row > span:first-child { width: 16px; }
+  .live-deck-eq-row > span:first-child { width: 16px; flex-shrink: 0; }
   .live-deck-eq-row .rotary {
     width: 24px;
     height: 24px;
@@ -1289,6 +1300,7 @@
     text-align: right;
     color: var(--text);
     font-variant-numeric: tabular-nums;
+    min-width: 24px;
   }
   /* Rotary dial — circular knob with a small accent indicator that
      rotates from -135° to +135° as the value moves from min to max. */
@@ -1871,6 +1883,48 @@
   .grain-wave { height: 50px; }
   .mic-scope  { height: 38px; }
   .sample-area { display: flex; flex-direction: column; gap: 6px; max-width: 100%; }
+  /* 4×4 pad grid for the sampler. Each pad is a small square button that
+     shows the pad number; selected pad takes the accent colour. */
+  .sampler-pads {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 4px;
+    max-width: 220px;
+  }
+  .sampler-pad {
+    aspect-ratio: 1 / 1;
+    min-height: 32px;
+    background: transparent;
+    border: 1px solid var(--cell-border);
+    color: var(--muted);
+    font: inherit;
+    font-size: 11px;
+    cursor: pointer;
+    border-radius: 3px;
+    padding: 0;
+    transition: background 80ms, color 80ms, border-color 80ms;
+  }
+  .sampler-pad:hover { border-color: var(--text); color: var(--text); }
+  .sampler-pad.on {
+    background: var(--accent);
+    color: #fff;
+    border-color: var(--accent);
+  }
+  .sampler-pad-ctrls {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px;
+  }
+  .sampler-pad-label {
+    font-size: 9px;
+    color: var(--accent);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    font-weight: 600;
+    width: 100%;
+  }
+  .sampler-wave { height: 70px; }
   .mic-control select.mic-device {
     background: transparent;
     border: 1px solid var(--cell-border);
@@ -2072,6 +2126,7 @@
         <button class="small add-track" data-kind="mellotron">+ Mellotron</button>
         <button class="small add-track" data-kind="mic">+ Mic</button>
         <button class="small add-track" data-kind="granular">+ Granular</button>
+        <button class="small add-track" data-kind="sampler">+ Sampler</button>
       </div>
 
       <div class="live-controls" id="live-controls">
@@ -3255,6 +3310,54 @@
     src.stop(t + lenSec + 0.05);
   }
 
+  // ---------- sampler (16-pad slice player) ----------
+  // Same recording / load plumbing as granular, but the sample is divided
+  // into 16 pads, each with its own start/end region. Steps store the pad
+  // index instead of a pitch.
+  function vSampler(ctx, t, out, tr, step) {
+    if (!tr.buffer) return;
+    const padIdx = step && step.pad != null ? step.pad : 0;
+    const pad = tr.pads && tr.pads[padIdx];
+    if (!pad) return;
+    const dur = tr.buffer.duration;
+    const startSec = clamp(pad.start || 0, 0, 0.999) * dur;
+    const endSec   = clamp(pad.end ?? 1, 0.001, 1) * dur;
+    if (endSec <= startSec + 0.002) return;
+
+    const semis = (tr.pitch || 0) + (pad.pitch || 0) + ((step && step.pitch) || 0);
+    const rate  = Math.pow(2, semis / 12);
+    const sliceSec = (endSec - startSec) / rate;
+    if (sliceSec <= 0.001) return;
+
+    const src = ctx.createBufferSource();
+    src.buffer = tr.buffer;
+    src.playbackRate.value = rate;
+
+    const g = ctx.createGain();
+    const padGain = pad.gain != null ? pad.gain : 1;
+    const att = Math.min(tr.attack || 0.002, sliceSec * 0.3);
+    const rel = Math.min(tr.release || 0.04, sliceSec * 0.3);
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.linearRampToValueAtTime(padGain, t + att);
+    g.gain.setValueAtTime(padGain, t + sliceSec - rel);
+    g.gain.linearRampToValueAtTime(0.0001, t + sliceSec);
+
+    src.connect(g).connect(out);
+    src.start(t, startSec, sliceSec * rate);
+    src.stop(t + sliceSec + 0.05);
+  }
+
+  // One-shot pad audition — routes a sampler pad straight to the track input
+  // so the user hears the same chain (EQ / sends / fx) as during playback.
+  function previewPad(track, padIdx) {
+    if (!track.buffer) return;
+    initAudio();
+    if (!track.input) initTrackAudio(track);
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+    const step = { pad: padIdx, vel: 1, pan: 0 };
+    vSampler(audioCtx, audioCtx.currentTime + 0.01, track.input, track, step);
+  }
+
   async function enableGranularListen(track, listenBtn, recBtn, statusEl) {
     if (track.stream) return;
     initAudio();
@@ -4145,7 +4248,7 @@
   };
   const KIND_LABELS = {
     drum: 'Drum', bass: 'Bass', lead: 'Synth', chord: 'Chord',
-    mellotron: 'Mellotron', mic: 'Mic', granular: 'Granular',
+    mellotron: 'Mellotron', mic: 'Mic', granular: 'Granular', sampler: 'Sampler',
   };
 
   let nextTrackId = 1;
@@ -4321,6 +4424,20 @@
           lfoRate: 1, lfoDepth: 0, lfoShape: 'sine',
         };
         break;
+      case 'sampler':
+        specific = {
+          voice: vSampler, buffer: null, sampleFile: null,
+          pitch: 0,
+          attack: 0.005, release: 0.04,
+          selectedPad: 0,
+          pads: Array.from({ length: 16 }, (_, i) => ({
+            start: i / 16,
+            end: (i + 1) / 16,
+            pitch: 0,
+            gain: 1,
+          })),
+        };
+        break;
     }
     const t = { ...base, ...specific, ...overrides };
     // restore voice references that may be lost via serialization
@@ -4332,6 +4449,7 @@
     if (t.kind === 'cs80')   t.voice = vCs80;
     if (t.kind === 'chord')  t.voice = vChord;
     if (t.kind === 'granular') t.voice = vGranular;
+    if (t.kind === 'sampler')  t.voice = vSampler;
     if (t.kind === 'mellotron') t.voice = vMellotron;
     return t;
   }
@@ -5117,6 +5235,65 @@
     }
   }
 
+  // Sampler waveform — draws the buffer with a coloured region per pad and
+  // highlights the currently-selected pad in accent. Used by both the sampler
+  // UI canvas and as a click target for re-slicing.
+  function drawSamplerWaveform(canvas, track) {
+    syncCanvasSize(canvas);
+    const ctx = canvas.getContext('2d');
+    const w = canvas.width, h = canvas.height;
+    const ink = getInkColor();
+    ctx.clearRect(0, 0, w, h);
+    const buffer = track.buffer;
+    if (!buffer) {
+      ctx.fillStyle = '#888';
+      ctx.font = '10px monospace';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('no sample — Listen + Rec, or Load a file', w / 2, h / 2);
+      return;
+    }
+    const data = buffer.getChannelData(0);
+    const step = Math.max(1, Math.floor(data.length / w));
+    const amp = h / 2;
+    ctx.strokeStyle = ink;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    for (let i = 0; i < w; i++) {
+      let min = 1.0, max = -1.0;
+      const s0 = i * step;
+      const e0 = Math.min(s0 + step, data.length);
+      for (let j = s0; j < e0; j++) { const v = data[j]; if (v < min) min = v; if (v > max) max = v; }
+      ctx.moveTo(i, (1 - max) * amp);
+      ctx.lineTo(i, (1 - min) * amp);
+    }
+    ctx.stroke();
+    const pads = track.pads || [];
+    const sel = track.selectedPad || 0;
+    const accent = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() || '#8B5CF6';
+    pads.forEach((pad, idx) => {
+      const x0 = clamp(pad.start || 0, 0, 1) * w;
+      const x1 = clamp(pad.end ?? 1, 0, 1) * w;
+      const isSel = idx === sel;
+      ctx.fillStyle = isSel ? accent : ink;
+      ctx.globalAlpha = isSel ? 0.20 : 0.05;
+      ctx.fillRect(x0, 0, Math.max(1, x1 - x0), h);
+      ctx.globalAlpha = 1;
+      ctx.strokeStyle = isSel ? accent : ink;
+      ctx.lineWidth = isSel ? 1.5 : 0.5;
+      ctx.beginPath();
+      ctx.moveTo(x0 + 0.5, 0); ctx.lineTo(x0 + 0.5, h);
+      ctx.moveTo(x1 + 0.5, 0); ctx.lineTo(x1 + 0.5, h);
+      ctx.stroke();
+      ctx.fillStyle = isSel ? accent : 'rgba(128,128,128,0.75)';
+      ctx.font = '8px monospace';
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'top';
+      ctx.fillText(String(idx + 1), x0 + 2, 2);
+    });
+    ctx.lineWidth = 1;
+  }
+
   function startMicScope(track, canvas) {
     track._scopeStop = false;
     const cctx = canvas.getContext('2d');
@@ -5273,6 +5450,9 @@
         if (track.kind === 'granular' || track.kind === 'mellotron') {
           const scaleSemis = [0, 2, 3, 5, 7, 8, 10, 12];
           entry.pitch = scaleSemis[Math.floor(Math.random() * scaleSemis.length)];
+        }
+        if (track.kind === 'sampler') {
+          entry.pad = Math.floor(Math.random() * 16);
         }
         entry.vel = 0.6 + Math.random() * 0.4;
         track.pattern[i] = entry;
@@ -8376,6 +8556,131 @@
       ));
     }
 
+    if (track.kind === 'sampler') {
+      const area = el('div', 'sample-area');
+      const head = el('div', 'group');
+      const listenBtn = el('button', 'mic-btn', track.stream ? '■ Stop Listen' : '🎤 Listen');
+      if (track.stream) listenBtn.classList.add('on');
+      const recBtn = el('button', 'mic-btn', '● Rec');
+      recBtn.disabled = !track.stream;
+      const loadBtn = el('button', 'mic-btn', 'Load File');
+      const sliceBtn = el('button', 'mic-btn', 'Auto-slice 16');
+      sliceBtn.title = 'split the loaded sample into 16 equal pads';
+      const status = el('span', 'sample-status', track.buffer ? track.buffer.duration.toFixed(2) + 's loaded' : 'no sample');
+      const wave = el('canvas', 'grain-wave sampler-wave');
+      wave.width = 380; wave.height = 60;
+
+      const padGrid = el('div', 'sampler-pads');
+      const padBtns = [];
+      const refreshPadGrid = () => {
+        const sel = track.selectedPad || 0;
+        padBtns.forEach((b, i) => b.classList.toggle('on', i === sel));
+      };
+
+      let padCtrlHost = null;
+      const renderPadCtrls = () => {
+        if (!padCtrlHost) return;
+        padCtrlHost.innerHTML = '';
+        const idx = track.selectedPad || 0;
+        const pad = track.pads[idx];
+        if (!pad) return;
+        padCtrlHost.appendChild(el('div', 'sampler-pad-label', 'Pad ' + (idx + 1)));
+        padCtrlHost.appendChild(knob('Start', 0, 0.999, 0.001, pad.start || 0, v => {
+          pad.start = Math.min(v, (pad.end ?? 1) - 0.001);
+          refreshWave();
+        }, v => v.toFixed(3)));
+        padCtrlHost.appendChild(knob('End',   0.001, 1, 0.001, pad.end ?? 1, v => {
+          pad.end = Math.max(v, (pad.start || 0) + 0.001);
+          refreshWave();
+        }, v => v.toFixed(3)));
+        padCtrlHost.appendChild(knob('Pitch', -24, 24, 1, pad.pitch || 0, v => pad.pitch = v, v => (v >= 0 ? '+' : '') + v));
+        padCtrlHost.appendChild(knob('Gain',  0, 2, 0.01, pad.gain == null ? 1 : pad.gain, v => pad.gain = v, v => v.toFixed(2)));
+      };
+
+      const refreshWave = () => drawSamplerWaveform(wave, track);
+      refreshWave();
+      track._refreshWave = refreshWave;
+
+      for (let i = 0; i < 16; i++) {
+        const b = el('button', 'sampler-pad', String(i + 1));
+        b.addEventListener('click', (e) => {
+          track.selectedPad = i;
+          refreshPadGrid();
+          renderPadCtrls();
+          refreshWave();
+          if (e.shiftKey) previewPad(track, i);
+        });
+        b.addEventListener('dblclick', () => previewPad(track, i));
+        padBtns.push(b);
+        padGrid.appendChild(b);
+      }
+      refreshPadGrid();
+
+      listenBtn.addEventListener('click', () => {
+        if (track.stream) disableGranularListen(track, listenBtn, recBtn, status);
+        else enableGranularListen(track, listenBtn, recBtn, status);
+      });
+      const tabBtn = el('button', 'mic-btn', '🖥 Tab');
+      tabBtn.title = 'capture audio from another browser tab/window';
+      tabBtn.addEventListener('click', () => {
+        if (track.stream) disableGranularListen(track, listenBtn, recBtn, status);
+        else enableGranularListenTab(track, listenBtn, recBtn, status);
+      });
+      recBtn.addEventListener('click', () => {
+        if (track.recorder && track.recorder.state === 'recording') stopGranularRecord(track);
+        else startGranularRecord(track, recBtn, status);
+      });
+      loadBtn.addEventListener('click', () => loadGranularFile(track, status));
+      sliceBtn.addEventListener('click', () => {
+        for (let i = 0; i < 16; i++) {
+          track.pads[i].start = i / 16;
+          track.pads[i].end   = (i + 1) / 16;
+        }
+        refreshWave();
+        renderPadCtrls();
+      });
+
+      // Click on the waveform sets the selected pad's start to that point;
+      // shift-click sets its end. Keeps trimming on a single canvas hit.
+      wave.style.cursor = 'crosshair';
+      wave.addEventListener('click', (e) => {
+        if (!track.buffer) return;
+        const rect = wave.getBoundingClientRect();
+        const x = clamp((e.clientX - rect.left) / rect.width, 0, 1);
+        const pad = track.pads[track.selectedPad || 0];
+        if (!pad) return;
+        if (e.shiftKey) {
+          pad.end = Math.max(x, (pad.start || 0) + 0.001);
+        } else {
+          pad.start = Math.min(x, (pad.end ?? 1) - 0.001);
+        }
+        refreshWave();
+        renderPadCtrls();
+      });
+
+      head.appendChild(listenBtn);
+      head.appendChild(tabBtn);
+      head.appendChild(recBtn);
+      head.appendChild(loadBtn);
+      head.appendChild(sliceBtn);
+      head.appendChild(status);
+      area.appendChild(head);
+      area.appendChild(wave);
+      area.appendChild(padGrid);
+      k.appendChild(area);
+
+      const padGroup = el('div', 'group sampler-pad-ctrls');
+      padCtrlHost = padGroup;
+      renderPadCtrls();
+      k.appendChild(padGroup);
+
+      k.appendChild(group('Play',
+        knob('Pitch', -24, 24, 1, track.pitch, v => track.pitch = v, v => (v >= 0 ? '+' : '') + v),
+        knob('Att',   0.001, 0.5, 0.001, track.attack,  v => track.attack  = v, v => v.toFixed(3)),
+        knob('Rel',   0.001, 0.5, 0.001, track.release, v => track.release = v, v => v.toFixed(3)),
+      ));
+    }
+
     if (track.kind === 'drum') {
       const drumGroups = {
         'Generic':   ['kick','snare','clap','hat','open-hat','ride','crash','tom-hi','tom-mid','tom-low','clave'],
@@ -8817,6 +9122,15 @@
           renderStep(cell, track, i);
         }, { passive: false });
       }
+      if (track.kind === 'sampler') {
+        cell.addEventListener('wheel', (e) => {
+          if (!track.pattern[i]) return;
+          e.preventDefault();
+          const dir = e.deltaY < 0 ? 1 : -1;
+          track.pattern[i].pad = clamp((track.pattern[i].pad || 0) + dir, 0, 15);
+          renderStep(cell, track, i);
+        }, { passive: false });
+      }
 
       col.appendChild(cell);
 
@@ -8860,6 +9174,23 @@
         up.addEventListener('click', () => {
           if (!track.pattern[i]) return;
           track.pattern[i].pitch = clamp((track.pattern[i].pitch || 0) + 1, -24, 24);
+          renderStep(cell, track, i);
+        });
+        ctrl.appendChild(dn); ctrl.appendChild(up);
+        col.appendChild(ctrl);
+      }
+      if (track.kind === 'sampler') {
+        const ctrl = el('div', 'step-mini');
+        const dn = el('button', null, '−');
+        const up = el('button', null, '+');
+        dn.addEventListener('click', () => {
+          if (!track.pattern[i]) return;
+          track.pattern[i].pad = clamp((track.pattern[i].pad || 0) - 1, 0, 15);
+          renderStep(cell, track, i);
+        });
+        up.addEventListener('click', () => {
+          if (!track.pattern[i]) return;
+          track.pattern[i].pad = clamp((track.pattern[i].pad || 0) + 1, 0, 15);
           renderStep(cell, track, i);
         });
         ctrl.appendChild(dn); ctrl.appendChild(up);
@@ -8931,10 +9262,11 @@
     if (track.kind === 'granular') return { ...base, pitch: 0, length: len };
     if (track.kind === 'mellotron') return { ...base, pitch: 0, length: len };
     if (track.kind === 'chord') return { ...base, degree: 0, quality: 'auto', length: len };
+    if (track.kind === 'sampler') return { ...base, pad: track.selectedPad || 0, length: len };
     return base;
   }
   // Which kinds support per-step note length
-  const NOTE_LEN_KINDS = new Set(['bass','lead','sh101','juno','cs80','chord','mellotron','granular']);
+  const NOTE_LEN_KINDS = new Set(['bass','lead','sh101','juno','cs80','chord','mellotron','granular','sampler']);
   function toggleStep(track, i) {
     track.pattern[i] = track.pattern[i] ? false : defaultEntry(track);
   }
@@ -8951,6 +9283,8 @@
     } else if (on && track.kind === 'chord') {
       const numerals = ['I','II','III','IV','V','VI','VII'];
       txt = numerals[track.pattern[i].degree | 0];
+    } else if (on && track.kind === 'sampler') {
+      txt = String((track.pattern[i].pad || 0) + 1);
     }
     if (pitchEl) pitchEl.textContent = txt;
     else cell.textContent = txt;
@@ -9980,7 +10314,7 @@
     if (t.eqNodes) { t.eqNodes.forEach(n => { try { n.disconnect(); } catch (e) {} }); t.eqNodes = null; }
   }
   async function addTrack(kind, overrides) {
-    if ((kind === 'mic' || kind === 'granular') && !projectDir && window.showDirectoryPicker) {
+    if ((kind === 'mic' || kind === 'granular' || kind === 'sampler') && !projectDir && window.showDirectoryPicker) {
       const want = window.confirm(
         'Adding a ' + kind + ' track.\n\n' +
         'Pick a project folder now to keep samples and the project file together?\n' +
@@ -10020,7 +10354,8 @@
     ['chord',     'Chord'],
     ['mellotron', 'Mellotron'],
     ['mic',       'Mic'],
-    ['granular',  'Granular']
+    ['granular',  'Granular'],
+    ['sampler',   'Sampler']
   ];
   function appendAddInstrumentButton(host) {
     if (!host) return;
@@ -10189,7 +10524,7 @@
     'name','kind','voice','voiceType','wave','waveA','waveB',
     'steps','pattern','expanded',
     'mute','solo','armed','mono','group','noteLen',
-    'sampleFile','buffer','deviceId','enabled','eqBands',
+    'sampleFile','buffer','deviceId','enabled','eqBands','pads','selectedPad',
     'scale','seventh','ninth','subOctave','lfoShape','trkLfoShape','div','sync',
     'morphStates','morphPos','deck','_pendingMute','_pendingArmed',
     // Track volume + the per-track sends are channel-mix values the user
@@ -10847,7 +11182,7 @@
     const stepDur = 60 / bpm / 4;
     // longest pattern length in steps among playable tracks
     const playable = (data.tracks || []).filter(t =>
-      t.kind !== 'mic' && t.kind !== 'granular' && Array.isArray(t.pattern) && t.pattern.length);
+      t.kind !== 'mic' && t.kind !== 'granular' && t.kind !== 'sampler' && Array.isArray(t.pattern) && t.pattern.length);
     if (playable.length === 0) return null;
     const maxSteps = Math.max(...playable.map(t => t.steps || t.pattern.length));
     const durSec = stepDur * maxSteps + 2.0; // tail for releases
@@ -11024,6 +11359,7 @@
     mic:    ['hpfFreq','inputGain','eqBands','deviceId'],
     granular:['pitch','truncStart','truncEnd','playStart','length','attack','release',
               'loop','lfoRate','lfoDepth','lfoShape','sampleFile'],
+    sampler: ['pitch','attack','release','selectedPad','pads','sampleFile'],
   };
   function serializeTrack(t) {
     const out = {};
@@ -11224,7 +11560,7 @@
   }
   async function reloadGranularSamples() {
     for (const t of tracks) {
-      if (t.kind !== 'granular' || !t.sampleFile) continue;
+      if ((t.kind !== 'granular' && t.kind !== 'sampler') || !t.sampleFile) continue;
       const ab = await readSampleFromFolder(t.sampleFile);
       if (!ab) continue;
       try {
@@ -11540,6 +11876,7 @@
     volRow.appendChild(volVal);
     host.appendChild(volRow);
 
+    const bandsRow = el('div', 'live-deck-eq-bands');
     [['LO','low'],['MD','mid'],['HI','high']].forEach(([label, band]) => {
       const row = el('div', 'live-deck-eq-row');
       row.appendChild(el('span', null, label));
@@ -11567,8 +11904,9 @@
       row.appendChild(dial);
       row.appendChild(valEl);
       row.appendChild(kill);
-      host.appendChild(row);
+      bandsRow.appendChild(row);
     });
+    host.appendChild(bandsRow);
   }
   buildDeckEq('A'); buildDeckEq('B');
 
