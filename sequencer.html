@@ -220,16 +220,18 @@
 
   /* ---- Track mode (recording): three columns — instruments | sequencer
      (with quick controls above) | details (Instrument + Channel). */
+  /* Padding-bottom reserves room for the fixed mixer at the bottom of
+     the viewport so scrollable content above doesn't hide under it. */
+  body.mode-recording { padding-bottom: 30vh; }
   body.mode-recording #tracks {
     display: grid;
     grid-template-columns: 220px auto minmax(280px, 1fr);
     gap: 24px;
-    /* Default `align-items: stretch` so every column matches the tallest one
-       — that way the divider line on .panel-details spans the full height. */
+    /* Columns stretch to the tallest sibling so the divider lines span
+       the full height of the visible content area (viewport - transport
+       above - fixed mixer below). */
     align-items: stretch;
-    /* Force a minimum row height so the divider still goes most of the way
-       down the viewport even when the selected track has little content. */
-    min-height: calc(100vh - 220px);
+    min-height: calc(70vh - 130px);
   }
   .panel-instruments {
     display: flex;
@@ -350,23 +352,26 @@
     align-items: flex-start;
     gap: 14px;
   }
-  /* Bottom mixer strip — quick access to every channel's vol + mute while
-     editing a single track. Locked to 30vh; the fader + meter inside each
-     strip fill whatever vertical space is left after the name + EQ. One
-     scrollable row, never wraps. */
+  /* Bottom mixer strip — pinned to the bottom 30vh of the viewport so
+     the divider line above it always sits at 70 % from the top, no
+     matter how short the rest of the Track view is. */
   .panel-mixer {
-    grid-column: 1 / -1;
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
     display: flex;
     flex-direction: row;
     flex-wrap: nowrap;
     overflow-x: auto;
     gap: 8px;
-    padding-top: 16px;
-    margin-top: 16px;
+    padding: 16px 20px 16px 20px;
+    background: var(--bg);
     border-top: 1px solid var(--line);
     height: 30vh;
     min-height: 240px;
     box-sizing: border-box;
+    z-index: 4;
   }
   .mini-channel {
     flex: 0 0 110px;
