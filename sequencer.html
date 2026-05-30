@@ -231,17 +231,31 @@
        down the viewport even when the selected track has little content. */
     min-height: calc(100vh - 220px);
   }
-  .panel-instruments { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+  .panel-instruments {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+    /* Divider line between instruments list and sequencer */
+    padding-right: 24px;
+    border-right: 1px solid var(--line);
+  }
   .panel-sequencer   { min-width: 0; }
   .panel-details     { min-width: 0; padding-left: 24px; border-left: 1px solid var(--line); }
-  .panel-track-name {
-    font-size: 16px;
+  /* Track-name headers share the exact same style across the instruments
+     list, the sequencer column header, and each details section header. */
+  .panel-track-name,
+  .knobs-section-name,
+  .instrument-item .track-name input.name-input {
+    font-size: 12px;
     font-weight: 500;
     color: var(--text);
+    letter-spacing: 0.3px;
+  }
+  .panel-track-name {
     margin-bottom: 14px;
     padding-bottom: 10px;
     border-bottom: 1px solid var(--line);
-    letter-spacing: 0.3px;
   }
   .panel-seq-header {
     padding-bottom: 10px;
@@ -322,12 +336,6 @@
   .knobs-section-head {
     margin-bottom: 10px;
   }
-  .knobs-section-name {
-    font-size: 14px;
-    font-weight: 500;
-    color: var(--text);
-    letter-spacing: 0.3px;
-  }
   .knobs-section-title {
     font-size: 10px;
     text-transform: uppercase;
@@ -342,6 +350,63 @@
     align-items: flex-start;
     gap: 14px;
   }
+  /* Bottom mixer strip — quick access to every channel's vol + mute
+     while editing a single track. Spans all three columns. */
+  .panel-mixer {
+    grid-column: 1 / -1;
+    display: flex;
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding-top: 16px;
+    margin-top: 16px;
+    border-top: 1px solid var(--line);
+  }
+  .mini-channel {
+    flex: 0 0 130px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 8px 10px;
+    border: 1px solid var(--line);
+    border-radius: 3px;
+    cursor: pointer;
+    transition: border-color 80ms ease;
+  }
+  .mini-channel:hover { border-color: var(--muted); }
+  .mini-channel.selected { border-color: var(--accent); }
+  .mini-channel-name {
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--text);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .mini-channel-vol-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .mini-channel-vol {
+    flex: 1;
+    accent-color: var(--accent);
+    height: 12px;
+    cursor: ew-resize;
+  }
+  .mini-channel-vol-val {
+    font-size: 9px;
+    color: var(--muted);
+    font-variant-numeric: tabular-nums;
+    width: 28px;
+    text-align: right;
+  }
+  .mini-channel-toggles {
+    display: flex;
+    flex-direction: row;
+    gap: 3px;
+  }
+  .mini-channel-toggles .toggle { width: 20px; height: 20px; font-size: 9px; }
   @media (max-width: 1100px) {
     body.mode-recording #tracks {
       grid-template-columns: 200px 1fr;
@@ -357,6 +422,12 @@
   }
   @media (max-width: 900px) {
     body.mode-recording #tracks { grid-template-columns: 1fr; }
+    .panel-instruments {
+      padding-right: 0;
+      border-right: none;
+      border-bottom: 1px solid var(--line);
+      padding-bottom: 14px;
+    }
   }
 
   /* Mix mode — vertical channel strips. Master is pinned to the right of
@@ -9077,13 +9148,17 @@
     _masterMeterFill = null;
 
     if (currentMode === 'recording') {
-      // Three-zone layout: instruments column + sequencer panel + details panel.
+      // Three-zone layout: instruments column + sequencer panel + details
+      // panel, with a full-width mini-mixer pinned underneath for quick
+      // access to every channel's vol + mute / solo / arm.
       const instPanel = el('aside', 'panel-instruments');
       const seqPanel  = el('section', 'panel-sequencer');
       const detPanel  = el('section', 'panel-details');
+      const mixPanel  = el('section', 'panel-mixer');
       tracksEl.appendChild(instPanel);
       tracksEl.appendChild(seqPanel);
       tracksEl.appendChild(detPanel);
+      tracksEl.appendChild(mixPanel);
 
       if (tracks.length === 0) {
         instPanel.appendChild(el('div', 'panel-empty',
@@ -9143,6 +9218,49 @@
         }
         // The now-empty wrap is removed — its parts live in the panels.
         wrap.remove();
+
+        // Mini-mixer strip for this track at the bottom of the view.
+        const mc = el('div', 'mini-channel');
+        if (t.id === selectedTrackId) mc.classList.add('selected');
+        mc.addEventListener('click', (e) => {
+          if (e.target.closest('button, input, select')) return;
+          if (selectedTrackId !== t.id) { selectedTrackId = t.id; rebuildTracksUI(); }
+        });
+        const mcName = el('div', 'mini-channel-name', t.name);
+        mc.appendChild(mcName);
+        const volRow = el('div', 'mini-channel-vol-row');
+        const volSlider = el('input');
+        volSlider.type = 'range'; volSlider.min = 0; volSlider.max = 1.2; volSlider.step = 0.01;
+        volSlider.value = t.volume;
+        volSlider.className = 'mini-channel-vol';
+        const volVal = el('span', 'mini-channel-vol-val', Number(t.volume).toFixed(2));
+        volSlider.addEventListener('input', () => {
+          const v = parseFloat(volSlider.value);
+          t.volume = v;
+          volVal.textContent = v.toFixed(2);
+          if (t.volNode && audioCtx) t.volNode.gain.setTargetAtTime(v, audioCtx.currentTime, 0.01);
+          if (t._mixFader) {
+            t._mixFader.value = v;
+            if (t._mixVolLabel) t._mixVolLabel.textContent = v.toFixed(2);
+          }
+        });
+        volRow.appendChild(volSlider);
+        volRow.appendChild(volVal);
+        mc.appendChild(volRow);
+
+        const togs = el('div', 'mini-channel-toggles');
+        const mkBtn = (label, isOn, onClick) => {
+          const b = el('button', 'toggle', label);
+          if (isOn) b.classList.add('on');
+          b.addEventListener('click', (e) => { e.stopPropagation(); onClick(); rebuildTracksUI(); });
+          return b;
+        };
+        togs.appendChild(mkBtn('A', t.armed, () => setArmedAcross(t, !t.armed, false)));
+        togs.appendChild(mkBtn('M', t.mute,  () => setMuteAcross(t, !t.mute, false)));
+        togs.appendChild(mkBtn('S', t.solo,  () => setSoloAcross(t, !t.solo)));
+        mc.appendChild(togs);
+
+        mixPanel.appendChild(mc);
       });
       return;
     }
