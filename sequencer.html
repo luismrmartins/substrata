@@ -218,46 +218,36 @@
   body.mode-mixing .mixer,
   body.mode-mixing .add-row { display: none !important; }
 
-  /* ---- Track mode (recording): instruments left | sequencer right.
-     Quick channel controls sit above the sequencer; deep Instrument /
-     Channel tweaks live in a bottom-pinned full-width panel. */
-  body.mode-recording {
-    /* Leave room for the fixed bottom controls so nothing hides under them */
-    padding-bottom: 320px;
-  }
+  /* ---- Track mode (recording): three columns — instruments | sequencer
+     (with quick controls above) | details (Instrument + Channel). */
   body.mode-recording #tracks {
     display: grid;
-    grid-template-columns: 240px minmax(0, 1fr);
-    gap: 16px;
+    grid-template-columns: 220px auto minmax(280px, 1fr);
+    gap: 24px;
     align-items: start;
   }
   .panel-instruments { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
   .panel-sequencer   { min-width: 0; }
+  .panel-details     { min-width: 0; padding-left: 24px; border-left: 1px solid var(--line); }
   .panel-seq-header {
     padding-bottom: 10px;
     margin-bottom: 12px;
     border-bottom: 1px solid var(--line);
   }
   .panel-seq-header .group { border-left: none; padding-left: 0; }
-  /* Bottom-pinned, full-width details panel */
-  .panel-details {
-    position: fixed;
-    bottom: 0;
-    left: 0;
-    right: 0;
-    background: var(--bg);
-    border-top: 1px solid var(--line);
-    padding: 14px 24px;
-    z-index: 5;
-    max-height: 40vh;
-    overflow-y: auto;
+  /* Sequencer step grid: at most 16 cells per row — wraps to a new row
+     for longer patterns. Uses CSS grid with 16 explicit columns so that
+     no matter the available width the grid stays at 16-per-line. */
+  .panel-sequencer .steps-row {
+    display: grid;
+    grid-template-columns: repeat(16, auto);
+    gap: 3px;
+    width: max-content;
   }
   .panel-details .track-knobs {
     display: flex;
-    flex-direction: row;
-    align-items: flex-start;
-    flex-wrap: wrap;
-    justify-content: flex-start;
+    flex-direction: column;
+    align-items: stretch;
     gap: 0;
     margin: 0;
     padding: 0;
@@ -303,18 +293,18 @@
     gap: 3px;
   }
   .instrument-item .toggle { width: 22px; height: 22px; font-size: 9px; }
-  .panel-sequencer .steps-row,
   .panel-sequencer .mic-control { margin: 0; }
-  /* Sections inside the bottom details panel — no boxes, just vertical
-     dividers, content left-aligned. */
+  /* Sections in the right-side details panel — no boxes, stacked
+     vertically and separated by horizontal divider lines. */
   .knobs-section {
-    padding: 0 24px;
+    padding: 0;
     border: none;
-    flex: 0 1 auto;
-    min-width: 0;
   }
-  .knobs-section:first-child { padding-left: 0; }
-  .knobs-section + .knobs-section { border-left: 1px solid var(--line); }
+  .knobs-section + .knobs-section {
+    border-top: 1px solid var(--line);
+    padding-top: 14px;
+    margin-top: 14px;
+  }
   .knobs-section-title {
     font-size: 10px;
     text-transform: uppercase;
@@ -329,17 +319,21 @@
     align-items: flex-start;
     gap: 14px;
   }
-  @media (max-width: 900px) {
-    body.mode-recording #tracks { grid-template-columns: 1fr; }
-    body.mode-recording { padding-bottom: 420px; }
-    .knobs-section + .knobs-section {
+  @media (max-width: 1100px) {
+    body.mode-recording #tracks {
+      grid-template-columns: 200px 1fr;
+    }
+    .panel-details {
+      grid-column: 1 / -1;
       border-left: none;
       border-top: 1px solid var(--line);
       padding-left: 0;
-      padding-top: 12px;
-      margin-top: 12px;
+      padding-top: 14px;
+      margin-top: 4px;
     }
-    .knobs-section { padding: 0; }
+  }
+  @media (max-width: 900px) {
+    body.mode-recording #tracks { grid-template-columns: 1fr; }
   }
 
   /* Mix mode — vertical channel strips. Master is pinned to the right of
