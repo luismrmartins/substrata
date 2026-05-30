@@ -876,6 +876,13 @@
     cursor: pointer;
   }
   .live-cue-rm:hover { border-color: var(--text); color: var(--text); }
+  .live-global-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding-top: 10px;
+    border-top: 1px solid var(--line);
+  }
   .live-xfade-row {
     display: flex;
     align-items: center;
@@ -1695,6 +1702,10 @@
             </div>
             <div class="live-deck-eq" id="live-deck-eq-B"></div>
           </div>
+        </div>
+        <div class="live-global-row">
+          <button class="small" id="live-arm-all"   title="Arm every channel on both decks (deferred to next downbeat)">Arm all</button>
+          <button class="small" id="live-unarm-all" title="Unarm every channel on both decks (deferred to next downbeat)">Unarm all</button>
         </div>
         <div class="live-xfade-row">
           <span class="live-xfade-label">A</span>
@@ -10317,6 +10328,18 @@
       setLiveCrossfade(0.5);
     });
   }
+  function setAllArmed(armed) {
+    for (const t of tracks) {
+      // Deferred = true: snap to next downbeat in Live mode so nothing
+      // jumps mid-step.
+      setArmedAcross(t, armed, true);
+    }
+    rebuildTracksUI();
+  }
+  const armAllBtn   = document.getElementById('live-arm-all');
+  const unarmAllBtn = document.getElementById('live-unarm-all');
+  if (armAllBtn)   armAllBtn.addEventListener('click',   () => setAllArmed(true));
+  if (unarmAllBtn) unarmAllBtn.addEventListener('click', () => setAllArmed(false));
   setLiveCrossfade(0.5);
 
   // ---- per-deck EQ UI ----
