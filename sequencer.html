@@ -4527,7 +4527,7 @@
   }
 
   // ---------- presets (drum / bass / lead / chord) ----------
-  const PRESET_KINDS = new Set(['drum','bass','lead','chord','mellotron']);
+  const PRESET_KINDS = new Set(['drum','bass','lead','sh101','juno','cs80','chord','mellotron']);
 
   // Bundled factory presets — classic Prophet-5 patches for lead (mono) and chord (poly).
   const FACTORY_PRESETS = {
@@ -7801,7 +7801,7 @@
     return base;
   }
   // Which kinds support per-step note length
-  const NOTE_LEN_KINDS = new Set(['bass','lead','chord','mellotron','granular']);
+  const NOTE_LEN_KINDS = new Set(['bass','lead','sh101','juno','cs80','chord','mellotron','granular']);
   function toggleStep(track, i) {
     track.pattern[i] = track.pattern[i] ? false : defaultEntry(track);
   }
