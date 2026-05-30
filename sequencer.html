@@ -4034,7 +4034,11 @@
       mono: false,
       eqLow: 0, eqMid: 0, eqHigh: 0,
       trkLfoRate: 0.5, trkLfoShape: 'sine',
-      trkLfoVolDepth: 0, trkLfoPanDepth: 0,
+      trkLfoVolDepth: 0, trkLfoPanDepth: 0, trkLfoCutDepth: 0,
+      // Channel-wide lowpass on the track output — kept fully open by
+      // default so it's inaudible until the user dials it down. The
+      // Track LFO can modulate its cutoff via trkLfoCutDepth.
+      trkLpfCutoff: 22000,
       // Per-track A / B / C morph states — saved with the project, loaded
       // back as snapshots of the instrument + channel params at the time
       // of save. The slider lerps between them at playback.
@@ -8588,6 +8592,14 @@
         track.trkLfoPanDepth = v;
         if (track.trkLfoPanG) track.trkLfoPanG.gain.setTargetAtTime(v, audioCtx.currentTime, 0.02);
       }, v => v.toFixed(2)),
+      knob('LPF', 100, 22000, 10, track.trkLpfCutoff, v => {
+        track.trkLpfCutoff = v;
+        if (track.trkLpf) track.trkLpf.frequency.setTargetAtTime(v, audioCtx.currentTime, 0.02);
+      }, v => Math.round(v)),
+      knob('Cut', 0, 1, 0.01, track.trkLfoCutDepth, v => {
+        track.trkLfoCutDepth = v;
+        if (track.trkLfoCutG) track.trkLfoCutG.gain.setTargetAtTime(v * 4000, audioCtx.currentTime, 0.02);
+      }, v => v.toFixed(2)),
     ));
   }
 
@@ -9721,16 +9733,23 @@
       t.bassLimiter.release.value   = 0.06;
       t.bassLimiter.knee.value      = 3;
     }
+    // Channel-wide lowpass — sits after the per-channel EQ. Default cutoff
+    // is 22 kHz so it's inaudible until the user dials it down. The Track
+    // LFO can sweep it (see trkLfoCutG below).
+    t.trkLpf = audioCtx.createBiquadFilter();
+    t.trkLpf.type = 'lowpass';
+    t.trkLpf.frequency.value = t.trkLpfCutoff || 22000;
+    t.trkLpf.Q.value = 0.7;
     // Meter analyser (cheap, parallel observer after vol/EQ)
     t.trkMeter = audioCtx.createAnalyser();
     t.trkMeter.fftSize = 256;
     t.input.connect(t.deckGainN).connect(t.volNode);
     t.volNode.connect(t.trkLfoMod).connect(t.trkPanNode)
-             .connect(t.trkEqLow).connect(t.trkEqMid).connect(t.trkEqHigh);
+             .connect(t.trkEqLow).connect(t.trkEqMid).connect(t.trkEqHigh).connect(t.trkLpf);
     if (t.bassLimiter) {
-      t.trkEqHigh.connect(t.bassLimiter).connect(t.duckGain);
+      t.trkLpf.connect(t.bassLimiter).connect(t.duckGain);
     } else {
-      t.trkEqHigh.connect(t.duckGain);
+      t.trkLpf.connect(t.duckGain);
     }
     t.duckGain.connect(t.trkMeter);
     t.duckGain.connect(deckBusInputFor(t.deck));
@@ -9741,14 +9760,17 @@
     t.duckGain.connect(t.bitcrushSendN).connect(bitcrushBus);
     if (spaceEchoBus) t.duckGain.connect(t.spaceEchoSendN).connect(spaceEchoBus);
 
-    // continuous track-level LFO modulates tremolo + auto-pan
+    // continuous track-level LFO modulates tremolo + auto-pan + channel LPF.
     t.trkLfo      = audioCtx.createOscillator();
     t.trkLfo.type = t.trkLfoShape || 'sine';
     t.trkLfo.frequency.value = t.trkLfoRate || 0.5;
     t.trkLfoVolG  = audioCtx.createGain(); t.trkLfoVolG.gain.value = t.trkLfoVolDepth || 0;
     t.trkLfoPanG  = audioCtx.createGain(); t.trkLfoPanG.gain.value = t.trkLfoPanDepth || 0;
+    // LFO → trkLpf.frequency: depth 1.0 = ±4000 Hz around the base cutoff.
+    t.trkLfoCutG  = audioCtx.createGain(); t.trkLfoCutG.gain.value = (t.trkLfoCutDepth || 0) * 4000;
     t.trkLfo.connect(t.trkLfoVolG).connect(t.trkLfoMod.gain);
     t.trkLfo.connect(t.trkLfoPanG).connect(t.trkPanNode.pan);
+    t.trkLfo.connect(t.trkLfoCutG).connect(t.trkLpf.frequency);
     t.trkLfo.start();
 
     if (t.kind === 'mic') {
@@ -9777,7 +9799,7 @@
     if (t.stream) { try { t.stream.getTracks().forEach(s => s.stop()); } catch (e) {} t.stream = null; }
     if (t._scopeStop !== undefined) t._scopeStop = true;
     if (t.trkLfo) { try { t.trkLfo.stop(); } catch (e) {} try { t.trkLfo.disconnect(); } catch (e) {} t.trkLfo = null; }
-    ['trkLfoVolG','trkLfoPanG','trkLfoMod','trkPanNode','trkEqLow','trkEqMid','trkEqHigh','trkMeter',
+    ['trkLfoVolG','trkLfoPanG','trkLfoCutG','trkLfoMod','trkPanNode','trkEqLow','trkEqMid','trkEqHigh','trkLpf','trkMeter',
      'micSource','inputGainN','hpf','micGate','analyser','input','deckGainN','volNode','duckGain','bassLimiter','spaceEchoSendN',
      'delaySendN','reverbSendN','chorusSendN','flangerSendN','bitcrushSendN']
       .forEach(k => { if (t[k]) { try { t[k].disconnect(); } catch (e) {} t[k] = null; } });
@@ -10701,7 +10723,7 @@
     common: ['name','kind','steps','pattern','volume','mute','solo','armed','group','swing','mono','noteLen','expanded',
              'eqLow','eqMid','eqHigh',
              'delaySend','reverbSend','chorusSend','flangerSend','bitcrushSend','spaceEchoSend','duckAmt',
-             'trkLfoRate','trkLfoShape','trkLfoVolDepth','trkLfoPanDepth',
+             'trkLfoRate','trkLfoShape','trkLfoVolDepth','trkLfoPanDepth','trkLfoCutDepth','trkLpfCutoff',
              'morphStates','morphPos',
              'patternBanks','activeBank'],
     drum:   ['voiceType','tune'],
