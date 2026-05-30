@@ -1262,6 +1262,24 @@
     cursor: ew-resize;
     height: 14px;
   }
+  body.mode-live .live-vol-wrap {
+    position: relative;
+    flex: 1;
+    display: flex;
+    align-items: center;
+  }
+  /* Faint tick at the original (load-time) volume position. The user can
+     see how far they've drifted from the project's saved mix. */
+  body.mode-live .live-vol-original-mark {
+    position: absolute;
+    top: 50%;
+    width: 2px;
+    height: 12px;
+    background: var(--muted);
+    transform: translate(-50%, -50%);
+    pointer-events: none;
+    opacity: 0.55;
+  }
   body.mode-live .live-vol-row .live-vol-val {
     font-size: 10px;
     color: var(--muted);
@@ -7414,10 +7432,24 @@
         if (track._mixVolLabel) track._mixVolLabel.textContent = v.toFixed(2);
       }
     });
-    liveVolRow.appendChild(liveVol);
+    // Wrap the slider so we can overlay a faint tick marking the original
+    // volume the track was loaded with (set by loadProjectIntoDeck).
+    const liveVolWrap = el('div', 'live-vol-wrap');
+    liveVolWrap.appendChild(liveVol);
+    const liveVolMark = el('div', 'live-vol-original-mark');
+    liveVolMark.title = 'Original volume at load time';
+    liveVolWrap.appendChild(liveVolMark);
+    if (typeof track._originalVolume === 'number') {
+      const pct = Math.max(0, Math.min(100, (track._originalVolume / 1.2) * 100));
+      liveVolMark.style.left = pct + '%';
+    } else {
+      liveVolMark.style.display = 'none';
+    }
+    liveVolRow.appendChild(liveVolWrap);
     liveVolRow.appendChild(liveVolVal);
     track._liveVol = liveVol;
     track._liveVolVal = liveVolVal;
+    track._liveVolMark = liveVolMark;
     wrap.appendChild(liveVolRow);
 
     // Per-track A/B/C morph row — visible only in Live mode (CSS-hidden
@@ -10647,6 +10679,10 @@
       t.deck = deck;
       t.armed = false;
       t._pendingArmed = undefined;
+      // Remember the volume the track was loaded with — the live channel
+      // strip draws a faint tick on its volume slider at this position so
+      // the user can see how far they've drifted from the project's mix.
+      t._originalVolume = (typeof t.volume === 'number') ? t.volume : 0.8;
       if (t.kind === 'mic') { t.enabled = false; t.stream = null; t.micSource = null; }
       tracks.push(t);
       if (audioCtx) {
