@@ -224,11 +224,25 @@
     display: grid;
     grid-template-columns: 220px auto minmax(280px, 1fr);
     gap: 24px;
-    align-items: start;
+    /* Default `align-items: stretch` so every column matches the tallest one
+       — that way the divider line on .panel-details spans the full height. */
+    align-items: stretch;
+    /* Force a minimum row height so the divider still goes most of the way
+       down the viewport even when the selected track has little content. */
+    min-height: calc(100vh - 220px);
   }
   .panel-instruments { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
   .panel-sequencer   { min-width: 0; }
   .panel-details     { min-width: 0; padding-left: 24px; border-left: 1px solid var(--line); }
+  .panel-track-name {
+    font-size: 16px;
+    font-weight: 500;
+    color: var(--text);
+    margin-bottom: 14px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--line);
+    letter-spacing: 0.3px;
+  }
   .panel-seq-header {
     padding-bottom: 10px;
     margin-bottom: 12px;
@@ -305,13 +319,22 @@
     padding-top: 14px;
     margin-top: 14px;
   }
+  .knobs-section-head {
+    margin-bottom: 10px;
+  }
+  .knobs-section-name {
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--text);
+    letter-spacing: 0.3px;
+  }
   .knobs-section-title {
     font-size: 10px;
     text-transform: uppercase;
     letter-spacing: 1.5px;
     color: var(--accent);
-    margin-bottom: 10px;
     font-weight: 600;
+    margin-top: 2px;
   }
   .knobs-section .knobs-row {
     display: flex;
@@ -9014,7 +9037,10 @@
 
     const makeSection = (title, items) => {
       const sec = el('div', 'knobs-section');
-      if (title) sec.appendChild(el('div', 'knobs-section-title', title));
+      const head = el('div', 'knobs-section-head');
+      head.appendChild(el('div', 'knobs-section-name', track.name));
+      if (title) head.appendChild(el('div', 'knobs-section-title', title));
+      sec.appendChild(head);
       const row = el('div', 'knobs-row');
       items.forEach(c => row.appendChild(c));
       sec.appendChild(row);
@@ -9097,9 +9123,11 @@
         // For the selected track only, move the sequencer + knobs into
         // their panels. The first child of knobs is the std controls
         // group (Stp / Vol / Swg / Mono [/ NLen]) — it lives in a header
-        // ABOVE the step grid, and the rest of the knobs are partitioned
-        // into Instrument / Channel sections in the bottom panel.
+        // ABOVE the step grid; the rest is partitioned into Instrument /
+        // Channel sections in the details panel.
         if (t.id === selectedTrackId) {
+          // Track name at the top of the sequencer column
+          seqPanel.appendChild(el('div', 'panel-track-name', t.name));
           if (knobs && t.kind !== 'mic' && knobs.firstElementChild) {
             const std = knobs.firstElementChild;
             const header = el('div', 'panel-seq-header');
