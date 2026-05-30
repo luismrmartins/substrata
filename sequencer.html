@@ -9544,6 +9544,11 @@
       else if (ms.B)         merged = { ...ms.B };
     }
     if (!merged) return;
+    // Strip any excluded keys (e.g. volume / sends captured by an earlier
+    // version of the code that didn't exclude them yet). Without this the
+    // morph would write a "locked" mix-channel value back over whatever
+    // the user has set, and dragging the slider wouldn't revert it.
+    for (const k of MORPH_EXCLUDE) delete merged[k];
     // Assign morphed params back to the track.
     Object.assign(track, merged);
     // Re-apply the channel-side params to live audio nodes so changes are
