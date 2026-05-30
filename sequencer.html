@@ -220,6 +220,9 @@
   body.mode-mixing .mic-control,
   body.mode-mixing .mixer,
   body.mode-mixing .add-row { display: none !important; }
+  /* Track mode hides the top add-row entirely — adding a new instrument
+     is done from the button at the bottom of the instruments column. */
+  body.mode-recording .add-row { display: none !important; }
 
   /* ---- Track mode (recording): three columns — instruments | sequencer
      (with quick controls above) | details (Instrument + Channel). */
@@ -397,6 +400,52 @@
     gap: 3px;
   }
   .instrument-item .toggle { width: 22px; height: 22px; font-size: 9px; }
+  /* Add-instrument button + popout menu at the bottom of the instruments
+     column (replaces the old top-row + Drum / + Bass / … strip). */
+  .add-instrument-wrap {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-top: 8px;
+  }
+  .add-instrument-btn {
+    background: transparent;
+    border: 1px dashed var(--cell-border);
+    color: var(--muted);
+    font: inherit;
+    font-size: 11px;
+    letter-spacing: 0.4px;
+    padding: 10px;
+    cursor: pointer;
+    text-align: center;
+    transition: border-color 80ms ease, color 80ms ease;
+  }
+  .add-instrument-btn:hover { border-color: var(--accent); color: var(--accent); }
+  .add-instrument-btn.on    { border-color: var(--accent); color: var(--accent); border-style: solid; }
+  .add-instrument-menu {
+    display: none;
+    flex-direction: column;
+    gap: 3px;
+    padding: 6px;
+    border: 1px solid var(--line);
+    border-radius: 3px;
+  }
+  .add-instrument-menu.open { display: flex; }
+  .add-instrument-option {
+    background: transparent;
+    border: 1px solid transparent;
+    color: var(--text);
+    font: inherit;
+    font-size: 11px;
+    padding: 6px 10px;
+    cursor: pointer;
+    text-align: left;
+  }
+  .add-instrument-option:hover {
+    background: rgba(139, 92, 246, 0.08);
+    border-color: var(--accent);
+    color: var(--accent);
+  }
   .panel-sequencer .mic-control { margin: 0; }
   /* Sections in the right-side details panel — no boxes, stacked
      vertically and separated by horizontal divider lines. */
@@ -9762,6 +9811,55 @@
     rebuildTracksUI();
     rebuildDuckerSourceOptions();
   }
+  // Build the "+ Add instrument" widget at the bottom of the Track-mode
+  // instruments column. The old top-row Add-track strip is hidden in
+  // Track mode; everything happens from this one button.
+  const ADD_INSTRUMENT_KINDS = [
+    ['drum',      'Drum'],
+    ['bass',      'Bass'],
+    ['lead',      'Synth'],
+    ['sh101',     'SH-101'],
+    ['juno',      'Juno-106'],
+    ['cs80',      'CS-80'],
+    ['chord',     'Chord'],
+    ['mellotron', 'Mellotron'],
+    ['mic',       'Mic'],
+    ['granular',  'Granular']
+  ];
+  function appendAddInstrumentButton(host) {
+    if (!host) return;
+    const wrap = el('div', 'add-instrument-wrap');
+    const btn  = el('button', 'add-instrument-btn', '+ Add instrument');
+    const menu = el('div', 'add-instrument-menu');
+    ADD_INSTRUMENT_KINDS.forEach(([kind, label]) => {
+      const opt = el('button', 'add-instrument-option', '+ ' + label);
+      opt.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        menu.classList.remove('open');
+        btn.classList.remove('on');
+        try { await addTrack(kind); }
+        catch (err) { console.error('addTrack failed:', err); alert('Add track failed: ' + (err && err.message)); }
+      });
+      menu.appendChild(opt);
+    });
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const open = menu.classList.toggle('open');
+      btn.classList.toggle('on', open);
+    });
+    // Click anywhere outside closes the menu.
+    const closeOnOutside = (e) => {
+      if (!wrap.contains(e.target)) {
+        menu.classList.remove('open');
+        btn.classList.remove('on');
+      }
+    };
+    document.addEventListener('click', closeOnOutside);
+    wrap.appendChild(btn);
+    wrap.appendChild(menu);
+    host.appendChild(wrap);
+  }
+
   // Pin each bottom-mixer strip's vertical fader + meter to exactly the
   // space available inside the strip. Necessary because range inputs with
   // appearance:slider-vertical only respect an explicit pixel height — CSS
@@ -10110,8 +10208,9 @@
 
       if (tracks.length === 0) {
         instPanel.appendChild(el('div', 'panel-empty',
-          'No tracks yet — use the + buttons above to add an instrument.'));
-        seqPanel.appendChild(el('div', 'panel-empty', 'Add a track to start sequencing.'));
+          'No instruments yet — use "+ Add instrument" below.'));
+        seqPanel.appendChild(el('div', 'panel-empty', 'Add an instrument to start sequencing.'));
+        appendAddInstrumentButton(instPanel);
         return;
       }
 
@@ -10198,6 +10297,9 @@
         // The now-empty wrap is removed — its parts live in the panels.
         wrap.remove();
       });
+
+      // Add-instrument button at the bottom of the instruments column.
+      appendAddInstrumentButton(instPanel);
 
       // Master channel strip at the end of the bottom mixer.
       buildMasterStrip();
