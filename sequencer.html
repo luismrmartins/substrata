@@ -392,26 +392,42 @@
     text-overflow: ellipsis;
     max-width: 100%;
   }
-  /* Each strip fills the mixer's 30vh height. The meter + fader can't use
-     flex sizing (range inputs with appearance:slider-vertical only honour
-     explicit pixel heights), so they get a calc that scales with viewport.
-     `30vh − 140px` budgets ~22 px name + ~96 px EQ + ~22 px padding/gaps. */
+  /* Each strip uses CSS grid so that the mix-strip row has a real pixel
+     height (1fr of the remaining space after name + EQ). With an explicit
+     parent height, .mix-meter and the appearance:slider-vertical .mix-fader
+     finally honour height:100% — no more dead space below the fader. */
   .panel-mixer .mini-channel,
   .panel-mixer .master-strip {
     height: 100%;
     box-sizing: border-box;
+    display: grid;
+    grid-template-rows: auto auto 1fr;
+    row-gap: 4px;
   }
-  .panel-mixer .mix-eq-wrap { margin-top: 4px; padding: 4px 6px; gap: 3px; flex: 0 0 auto; }
+  .panel-mixer .mix-eq-wrap { margin-top: 0; padding: 4px 6px; gap: 3px; }
   .panel-mixer .mix-strip {
-    flex: 1 1 auto;
-    align-items: center;
-    margin-top: 4px;
-    width: 100%;
+    min-height: 0;
+    height: 100%;
+    align-items: stretch;
+    justify-self: center;
     justify-content: center;
+    width: 100%;
+    margin-top: 0;
   }
-  .panel-mixer .mix-meter { height: calc(30vh - 150px); min-height: 80px; }
-  .panel-mixer .mix-fader { height: calc(30vh - 150px); min-height: 80px; }
-  .panel-mixer .mix-fader-wrap { gap: 2px; }
+  .panel-mixer .mix-meter { height: 100%; min-height: 0; }
+  .panel-mixer .mix-fader-wrap {
+    height: 100%;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    gap: 2px;
+  }
+  .panel-mixer .mix-fader {
+    flex: 1 1 0;
+    min-height: 0;
+    height: 100%;
+  }
   /* Master strip in the bottom mixer — same shape as a mini-channel,
      accent-bordered, pushed to the right with margin-left:auto. */
   .panel-mixer .master-strip {
