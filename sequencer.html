@@ -1105,15 +1105,12 @@
     gap: 14px;
     flex: 0 0 auto;
   }
-  /* Grid (not flex) — range inputs have a default min-width that overlaps
-     adjacent labels when packed too tight; minmax(0, 1fr) lets the slider
-     shrink to whatever space is left. */
+  /* Compact rotary layout — label · dial · value · kill, single line. */
   .live-master-eq-row {
-    display: grid;
-    grid-template-columns: 18px minmax(40px, 1fr) 38px 16px;
-    column-gap: 6px;
+    display: flex;
     align-items: center;
-    flex: 0 0 160px;
+    gap: 6px;
+    flex: 0 0 auto;
   }
   .live-master-eq-row .lbl {
     font-size: 9px;
@@ -1121,13 +1118,12 @@
     text-transform: uppercase;
     letter-spacing: 1px;
     white-space: nowrap;
+    width: 16px;
   }
-  .live-master-eq-row input[type="range"] {
-    width: 100%;
-    min-width: 0;
-    accent-color: var(--text);
-    height: 12px;
-    margin: 0;
+  .live-master-eq-row .rotary {
+    width: 24px;
+    height: 24px;
+    flex-shrink: 0;
   }
   .live-master-eq-row .v {
     font-size: 9px;
@@ -1135,6 +1131,7 @@
     font-variant-numeric: tabular-nums;
     text-align: right;
     white-space: nowrap;
+    width: 30px;
   }
   .live-master-vol {
     display: flex;
@@ -1273,20 +1270,22 @@
   }
   .live-deck-vol-row .v { text-align: right; color: var(--text); font-variant-numeric: tabular-nums; }
   .live-deck-eq-row {
-    display: grid;
-    grid-template-columns: 16px 1fr 36px 16px;
-    column-gap: 6px;
+    display: flex;
     align-items: center;
+    gap: 6px;
     font-size: 9px;
     color: var(--muted);
     text-transform: uppercase;
     letter-spacing: 0.5px;
   }
-  .live-deck-eq-row input[type="range"] {
-    height: 12px;
-    accent-color: var(--text);
+  .live-deck-eq-row > span:first-child { width: 16px; }
+  .live-deck-eq-row .rotary {
+    width: 24px;
+    height: 24px;
+    flex-shrink: 0;
   }
   .live-deck-eq-row .v {
+    flex: 1;
     text-align: right;
     color: var(--text);
     font-variant-numeric: tabular-nums;
@@ -10725,19 +10724,32 @@
     const eqWrap = el('div', 'mix-eq-wrap');
     const fmtMEq = v => (v > 0 ? '+' : '') + v.toFixed(1);
     const makeRow = (label, val, onChange) => {
-      const row = el('div', 'mix-eq-row');
+      const row = el('div', 'mix-eq-row mix-eq-rotary');
       const lab = el('span', 'eq-label', label);
       const valEl = el('span', 'eq-val', fmtMEq(val));
-      row.appendChild(lab);
-      row.appendChild(valEl);
-      const r = el('input'); r.type='range';
-      r.min = -15; r.max = 15; r.step = 0.5; r.value = val;
-      r.addEventListener('input', () => {
-        const v = parseFloat(r.value);
+      let saved = val;
+      let killed = false;
+      const kill = el('button', 'eq-kill', '✕');
+      kill.title = 'kill this band (-15 dB)';
+      const dial = makeRotary(-15, 15, val, (v) => {
+        if (killed) { killed = false; kill.classList.remove('on'); }
+        saved = v;
+        valEl.textContent = fmtMEq(v);
+        onChange(v);
+      }, fmtMEq);
+      kill.addEventListener('click', (e) => {
+        e.preventDefault();
+        killed = !killed;
+        kill.classList.toggle('on', killed);
+        const v = killed ? -15 : saved;
+        dial._setValue(v);
         valEl.textContent = fmtMEq(v);
         onChange(v);
       });
-      row.appendChild(r);
+      row.appendChild(lab);
+      row.appendChild(dial);
+      row.appendChild(valEl);
+      row.appendChild(kill);
       return row;
     };
     eqWrap.appendChild(makeRow('HI', master.high, v => {
@@ -11524,34 +11536,28 @@
     [['LO','low'],['MD','mid'],['HI','high']].forEach(([label, band]) => {
       const row = el('div', 'live-deck-eq-row');
       row.appendChild(el('span', null, label));
-      const r = el('input'); r.type='range'; r.min=-15; r.max=15; r.step=0.5;
-      r.value = liveDeckEq[deck][band];
-      const valEl = el('span', 'v', fmtEqDb(liveDeckEq[deck][band]));
-      let saved = liveDeckEq[deck][band];
+      const initial = liveDeckEq[deck][band];
+      const valEl = el('span', 'v', fmtEqDb(initial));
+      let saved = initial;
       let killed = false;
       const kill = el('button', 'eq-kill', '✕');
       kill.title = 'kill this band (-15 dB)';
-      r.addEventListener('input', () => {
-        const v = parseFloat(r.value);
+      const dial = makeRotary(-15, 15, initial, (v) => {
         if (killed) { killed = false; kill.classList.remove('on'); }
         saved = v;
         valEl.textContent = fmtEqDb(v);
         applyDeckEqBand(deck, band, v);
-      });
-      kill.addEventListener('click', () => {
+      }, fmtEqDb);
+      kill.addEventListener('click', (e) => {
+        e.preventDefault();
         killed = !killed;
         kill.classList.toggle('on', killed);
-        if (killed) {
-          saved = parseFloat(r.value);
-          r.value = -15;
-        } else {
-          r.value = saved;
-        }
-        const v = parseFloat(r.value);
+        const v = killed ? -15 : saved;
+        dial._setValue(v);
         valEl.textContent = fmtEqDb(v);
         applyDeckEqBand(deck, band, v);
       });
-      row.appendChild(r);
+      row.appendChild(dial);
       row.appendChild(valEl);
       row.appendChild(kill);
       host.appendChild(row);
@@ -11572,10 +11578,9 @@
     const makeBand = (label, prop, getNode) => {
       const row = el('div', 'live-master-eq-row');
       row.appendChild(el('span', 'lbl', label));
-      const r = el('input'); r.type='range'; r.min=-15; r.max=15; r.step=0.5;
-      r.value = master[prop];
-      const valEl = el('span', 'v', fmt(master[prop]));
-      let saved = master[prop];
+      const initial = master[prop];
+      const valEl = el('span', 'v', fmt(initial));
+      let saved = initial;
       let killed = false;
       const kill = el('button', 'live-master-kill', '✕');
       kill.title = 'Kill this band (-15 dB)';
@@ -11585,21 +11590,20 @@
         const n = getNode();
         if (n && audioCtx) n.gain.setTargetAtTime(v, audioCtx.currentTime, 0.02);
       };
-      r.addEventListener('input', () => {
-        const v = parseFloat(r.value);
+      const dial = makeRotary(-15, 15, initial, (v) => {
         if (killed) { killed = false; kill.classList.remove('on'); }
         saved = v;
         apply(v);
-      });
+      }, fmt);
       kill.addEventListener('click', (e) => {
         e.preventDefault();
         killed = !killed;
         kill.classList.toggle('on', killed);
-        if (killed) { saved = parseFloat(r.value); r.value = -15; }
-        else { r.value = saved; }
-        apply(parseFloat(r.value));
+        const v = killed ? -15 : saved;
+        dial._setValue(v);
+        apply(v);
       });
-      row.appendChild(r);
+      row.appendChild(dial);
       row.appendChild(valEl);
       row.appendChild(kill);
       return row;
