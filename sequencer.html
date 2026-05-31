@@ -60,9 +60,11 @@
   h2 { font-weight: 500; margin: 0; letter-spacing: 0.5px; font-size: 10px; text-transform: uppercase; color: var(--muted); margin: 0 0 8px; }
 
   h1.title {
-    margin: 0 0 14px;
+    margin: 0;
     line-height: 1;
     display: block;
+    /* Pushes the rest of the transport row to the right edge. */
+    margin-right: auto;
   }
   h1.title svg {
     display: block;
@@ -80,16 +82,38 @@
   /* Side effects panel only shows on the Effects tab */
   .side { display: none; }
   body.mode-effects .side {
-    display: flex;
-    flex-direction: column;
+    display: grid;
+    grid-template-columns: 240px 1fr;
     gap: 28px;
+    align-items: start;
+  }
+  /* FX-rack presets column on the left, sticky so it stays in view while
+     the user scrolls the modules on the right. */
+  body.mode-effects #fx-racks {
+    grid-column: 1;
+    grid-row: 1 / -1;
+    position: sticky;
+    top: 16px;
+    align-self: start;
   }
   /* Each section is its own auto-fit grid so module cards still flow into
-     multiple columns, but live under a labelled header. */
+     multiple columns, but live under a labelled header. Pinned to column 2. */
   body.mode-effects .fx-section {
+    grid-column: 2;
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
     gap: 18px;
+  }
+  @media (max-width: 900px) {
+    /* On narrow viewports collapse to a single column. */
+    body.mode-effects .side {
+      grid-template-columns: 1fr;
+    }
+    body.mode-effects #fx-racks,
+    body.mode-effects .fx-section {
+      grid-column: 1;
+      position: static;
+    }
   }
   body.mode-effects .fx-section-title {
     grid-column: 1 / -1;
@@ -133,6 +157,19 @@
     display: inline-flex; align-items: center; justify-content: center;
   }
   button.play.playing { background: transparent; color: var(--text); outline: 1px solid var(--accent); }
+  /* Transport record — icon-only red dot, same compact box as Play. */
+  button.rec {
+    background: transparent;
+    color: #e94747;
+    border: 1px solid var(--cell-border);
+    width: 34px; height: 28px;
+    padding: 0;
+    font: inherit; font-size: 16px; line-height: 1;
+    cursor: pointer;
+    display: inline-flex; align-items: center; justify-content: center;
+  }
+  button.rec:hover { border-color: #e94747; }
+  button.rec.on { background: #e94747; color: #fff; border-color: #e94747; }
   .transport button.small,
   .live-controls button.small,
   .module button.small,
@@ -454,6 +491,7 @@
   /* R + nudge buttons live on the sequencer header in Track mode, not in
      the per-instrument toggle row. */
   body.mode-recording .instrument-item .toggle.rnd,
+  body.mode-recording .instrument-item .toggle.sync,
   body.mode-recording .instrument-item .toggle.nudge { display: none !important; }
   /* Add-instrument button + popout menu at the bottom of the instruments
      column (replaces the old top-row + Drum / + Bass / … strip). */
@@ -524,10 +562,26 @@
     font-weight: 600;
     margin-top: 2px;
   }
+  /* Each instrument group (Osc A / Osc B / Filter / Envs / LFO / …) gets
+     its own row so they read top-to-bottom instead of being packed into a
+     wrap. Group internals still flow horizontally. */
   .knobs-section .knobs-row {
     display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+  }
+  .knobs-section .knobs-row > .group {
+    border-left: none;
+    padding-left: 0;
+    padding-right: 0;
+  }
+  .knobs-section .knobs-row > .group + .group {
+    border-top: 1px dashed var(--line);
+    padding-top: 8px;
+  }
+  .knobs-section .knobs-row .group-row {
     flex-wrap: wrap;
-    align-items: flex-start;
     gap: 14px;
   }
   /* Bottom mixer strip — pinned to the bottom 30vh of the viewport so
@@ -584,8 +638,37 @@
     height: 100%;
     box-sizing: border-box;
     display: grid;
-    grid-template-rows: auto auto 1fr;
     row-gap: 4px;
+  }
+  .panel-mixer .mini-channel { grid-template-rows: auto auto auto 1fr; }
+  .panel-mixer .master-strip { grid-template-rows: auto auto 1fr; }
+  /* Pan row sits between the channel name and the EQ. Horizontal slider
+     because pan is left-to-right; double-click recenters. */
+  .mini-pan-row {
+    display: grid;
+    grid-template-columns: 22px 1fr 26px;
+    align-items: center;
+    column-gap: 4px;
+    padding: 0 4px;
+  }
+  .mini-pan-row .pan-label {
+    font-size: 8px;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+  .mini-pan-row .mini-pan {
+    width: 100%;
+    height: 12px;
+    accent-color: var(--accent);
+    margin: 0;
+    cursor: ew-resize;
+  }
+  .mini-pan-row .pan-val {
+    font-size: 8px;
+    color: var(--text);
+    font-variant-numeric: tabular-nums;
+    text-align: right;
   }
   .panel-mixer .mix-eq-wrap { margin-top: 0; padding: 4px 6px; gap: 3px; }
   .panel-mixer .mix-strip {
@@ -807,6 +890,31 @@
   .mix-eq-row .eq-kill {
     grid-column: 2;
     align-self: center;
+  }
+  /* Meter wrapper — left column carries the dB scale labels (0 / -6 / -12
+     / -24), right column is the meter itself. Wrap auto-sizes to the
+     meter height so the existing resize logic keeps working. */
+  .mix-meter-wrap {
+    display: flex;
+    flex-direction: row;
+    align-items: stretch;
+    gap: 3px;
+  }
+  .mix-meter-scale {
+    position: relative;
+    flex: 0 0 14px;
+    height: auto;
+  }
+  .mix-meter-tick {
+    position: absolute;
+    right: 0;
+    transform: translateY(-50%);
+    font-size: 7px;
+    line-height: 1;
+    color: var(--muted);
+    font-variant-numeric: tabular-nums;
+    text-align: right;
+    white-space: nowrap;
   }
   /* Segmented meter — fixed number of small cells stacked bottom-up.
      Each segment has a faint colour matching its position on the
@@ -1756,6 +1864,37 @@
   }
   .side .row input[type="range"] { width: 100%; accent-color: var(--text); height: 12px; }
   .side .row .v { color: var(--muted); text-align: right; font-variant-numeric: tabular-nums; }
+  /* Effects rotary row — label · dial · value, optional kill cell. The
+     dial column is auto-width so the dial sits next to the label. */
+  .side .row.rotary-row {
+    grid-template-columns: 56px auto 1fr;
+    column-gap: 10px;
+  }
+  .side .row.rotary-row .rotary {
+    width: 26px;
+    height: 26px;
+    flex-shrink: 0;
+  }
+  .side .row.rotary-row .v { text-align: left; padding-left: 0; }
+  .side .row.eq-row.rotary-row { grid-template-columns: 56px auto 1fr 20px; }
+  /* Vertical fader for the master volume — narrow column, short slider. */
+  .side .row.vfader-row { grid-template-columns: 56px 1fr; }
+  .side .row.vfader-row .vfader-wrap {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 10px;
+  }
+  .side .row.vfader-row .vfader {
+    -webkit-appearance: slider-vertical;
+    appearance: slider-vertical;
+    writing-mode: bt-lr;
+    width: 24px;
+    height: 110px;
+    accent-color: var(--accent);
+    margin: 0;
+  }
+  .side .row.vfader-row .v { color: var(--text); font-variant-numeric: tabular-nums; }
   .side .row select {
     background: transparent;
     border: none;
@@ -2085,16 +2224,15 @@
 <body class="mode-recording">
   <div class="layout">
     <main>
+      <div class="transport">
       <h1 class="title" aria-label="substrata">
         <svg viewBox="0 0 514 94" xmlns="http://www.w3.org/2000/svg" role="img">
           <path class="logo-ink" d="M27.904 93.696C19.968 93.696 13.4827 91.8187 8.44802 88.064C3.41336 84.3094 0.597357 79.104 2.38419e-05 72.448H9.34402C9.85602 76.2027 11.7334 79.3174 14.976 81.792C18.304 84.2667 22.6987 85.504 28.16 85.504C33.4507 85.504 37.3334 84.352 39.808 82.048C42.2827 79.6587 43.52 77.056 43.52 74.24C43.52 70.3147 42.0267 67.6694 39.04 66.304C36.1387 64.9387 31.6587 63.9147 25.6 63.232C18.688 62.464 13.056 60.672 8.70402 57.856C4.35202 54.9547 2.17602 50.6454 2.17602 44.928C2.17602 39.8934 4.30936 35.6694 8.57602 32.256C12.928 28.8427 18.7734 27.136 26.112 27.136C33.4507 27.136 39.2107 28.8 43.392 32.128C47.6587 35.3707 50.048 40.1494 50.56 46.464H41.472C41.3014 43.136 39.7227 40.448 36.736 38.4C33.8347 36.352 30.208 35.328 25.856 35.328C21.248 35.328 17.664 36.1814 15.104 37.888C12.6294 39.5094 11.392 41.8134 11.392 44.8C11.392 47.4454 12.7574 49.7067 15.488 51.584C18.2187 53.376 22.5707 54.5707 28.544 55.168C32.9814 55.5947 36.992 56.4054 40.576 57.6C44.2454 58.7094 47.1894 60.544 49.408 63.104C51.6267 65.664 52.736 69.248 52.736 73.856C52.8214 77.6107 51.7974 81.024 49.664 84.096C47.5307 87.0827 44.5867 89.4294 40.832 91.136C37.1627 92.8427 32.8534 93.696 27.904 93.696ZM84.814 93.696C77.0487 93.696 71.246 91.4347 67.406 86.912C63.566 82.304 61.646 75.8187 61.646 67.456V28.672H70.606V66.432C70.606 72.32 71.9287 76.928 74.574 80.256C77.2194 83.584 81.2727 85.248 86.734 85.248C92.0247 85.248 96.5474 83.456 100.302 79.872C104.057 76.2027 105.934 70.9547 105.934 64.128V28.672H114.894V92.16H107.598L106.446 82.56H105.934C104.227 85.5467 101.497 88.1494 97.742 90.368C94.0727 92.5867 89.7634 93.696 84.814 93.696ZM151.324 93.696C146.375 93.696 142.151 92.672 138.652 90.624C135.239 88.4907 132.721 85.6747 131.1 82.176H130.332L129.052 92.16H122.14V3.05176e-05H131.1V38.4C132.807 35.4134 135.409 32.8107 138.908 30.592C142.407 28.288 146.545 27.136 151.324 27.136C156.871 27.136 161.735 28.416 165.916 30.976C170.097 33.536 173.383 37.2907 175.772 42.24C178.161 47.1894 179.356 53.2054 179.356 60.288C179.356 67.3707 178.161 73.4294 175.772 78.464C173.383 83.4134 170.055 87.2107 165.788 89.856C161.607 92.416 156.785 93.696 151.324 93.696ZM150.684 85.248C156.401 85.248 161.095 83.2 164.764 79.104C168.433 75.008 170.268 68.7787 170.268 60.416C170.268 52.0534 168.433 45.824 164.764 41.728C161.095 37.632 156.401 35.584 150.684 35.584C144.967 35.584 140.273 37.632 136.604 41.728C132.935 45.824 131.1 52.0534 131.1 60.416C131.1 68.7787 132.935 75.008 136.604 79.104C140.273 83.2 144.967 85.248 150.684 85.248Z"/>
           <path class="logo-accent" d="M212.074 93.696C204.138 93.696 197.653 91.8187 192.618 88.064C187.583 84.3094 184.767 79.104 184.17 72.448H193.514C194.026 76.2027 195.903 79.3174 199.146 81.792C202.474 84.2667 206.869 85.504 212.33 85.504C217.621 85.504 221.503 84.352 223.978 82.048C226.453 79.6587 227.69 77.056 227.69 74.24C227.69 70.3147 226.197 67.6694 223.21 66.304C220.309 64.9387 215.829 63.9147 209.77 63.232C202.858 62.464 197.226 60.672 192.874 57.856C188.522 54.9547 186.346 50.6454 186.346 44.928C186.346 39.8934 188.479 35.6694 192.746 32.256C197.098 28.8427 202.943 27.136 210.282 27.136C217.621 27.136 223.381 28.8 227.562 32.128C231.829 35.3707 234.218 40.1494 234.73 46.464H225.642C225.471 43.136 223.893 40.448 220.906 38.4C218.005 36.352 214.378 35.328 210.026 35.328C205.418 35.328 201.834 36.1814 199.274 37.888C196.799 39.5094 195.562 41.8134 195.562 44.8C195.562 47.4454 196.927 49.7067 199.658 51.584C202.389 53.376 206.741 54.5707 212.714 55.168C217.151 55.5947 221.162 56.4054 224.746 57.6C228.415 58.7094 231.359 60.544 233.578 63.104C235.797 65.664 236.906 69.248 236.906 73.856C236.991 77.6107 235.967 81.024 233.834 84.096C231.701 87.0827 228.757 89.4294 225.002 91.136C221.333 92.8427 217.023 93.696 212.074 93.696ZM271.544 92.16C265.997 92.16 261.645 90.8374 258.488 88.192C255.416 85.4614 253.88 80.5974 253.88 73.6V36.352H237.752V28.672H247.352C251.789 28.672 254.307 26.5387 254.904 22.272L256.44 12.672H262.84V28.672H288.44V36.352H262.84V73.6C262.84 77.44 263.693 80.128 265.4 81.664C267.192 83.2 270.264 83.968 274.616 83.968H288.44V92.16H271.544ZM291.59 92.16V84.48H308.486V38.912C308.486 38.2294 308.23 37.632 307.718 37.12C307.206 36.608 306.609 36.352 305.926 36.352H293.51V28.672H309.126C311.601 28.672 313.521 29.312 314.886 30.592C316.251 31.872 316.934 33.7494 316.934 36.224V39.808H317.446C318.385 35.7974 320.219 32.6827 322.95 30.464C325.766 28.2454 329.393 27.136 333.83 27.136H346.63V36.608H333.83C328.625 36.608 324.571 38.3147 321.67 41.728C318.854 45.1414 317.446 49.7067 317.446 55.424V84.48H337.542V92.16H291.59ZM372.436 93.696C367.401 93.696 363.22 92.8 359.892 91.008C356.649 89.216 354.217 86.8267 352.596 83.84C351.06 80.8534 350.292 77.6107 350.292 74.112C350.292 67.456 352.724 62.5067 357.588 59.264C362.537 55.936 368.767 54.272 376.276 54.272H394.452V53.12C394.452 47.1467 393.001 42.6667 390.1 39.68C387.284 36.608 383.231 35.072 377.94 35.072C373.503 35.072 369.833 36.0534 366.932 38.016C364.116 39.8934 362.324 42.88 361.556 46.976H352.084C352.511 42.7094 353.919 39.1254 356.308 36.224C358.783 33.2374 361.897 30.976 365.652 29.44C369.407 27.904 373.503 27.136 377.94 27.136C386.815 27.136 393.257 29.568 397.268 34.432C401.364 39.2107 403.412 45.44 403.412 53.12V92.16H395.732L394.836 81.92H394.068C392.191 85.0774 389.588 87.8507 386.26 90.24C382.932 92.544 378.324 93.696 372.436 93.696ZM373.844 85.504C378.111 85.504 381.78 84.4374 384.852 82.304C387.924 80.1707 390.271 77.3974 391.892 73.984C393.599 70.5707 394.452 66.9867 394.452 63.232V61.952H376.916C370.601 61.952 366.121 63.0614 363.476 65.28C360.916 67.4987 359.636 70.3574 359.636 73.856C359.636 77.44 360.831 80.2987 363.22 82.432C365.609 84.48 369.151 85.504 373.844 85.504ZM439.074 92.16C433.527 92.16 429.175 90.8374 426.018 88.192C422.946 85.4614 421.41 80.5974 421.41 73.6V36.352H405.282V28.672H414.882C419.319 28.672 421.837 26.5387 422.434 22.272L423.97 12.672H430.37V28.672H455.97V36.352H430.37V73.6C430.37 77.44 431.223 80.128 432.93 81.664C434.722 83.2 437.794 83.968 442.146 83.968H455.97V92.16H439.074ZM482.416 93.696C477.381 93.696 473.2 92.8 469.872 91.008C466.629 89.216 464.197 86.8267 462.576 83.84C461.04 80.8534 460.272 77.6107 460.272 74.112C460.272 67.456 462.704 62.5067 467.568 59.264C472.517 55.936 478.747 54.272 486.256 54.272H504.432V53.12C504.432 47.1467 502.981 42.6667 500.08 39.68C497.264 36.608 493.211 35.072 487.92 35.072C483.483 35.072 479.813 36.0534 476.912 38.016C474.096 39.8934 472.304 42.88 471.536 46.976H462.064C462.491 42.7094 463.899 39.1254 466.288 36.224C468.763 33.2374 471.877 30.976 475.632 29.44C479.387 27.904 483.483 27.136 487.92 27.136C496.795 27.136 503.237 29.568 507.248 34.432C511.344 39.2107 513.392 45.44 513.392 53.12V92.16H505.712L504.816 81.92H504.048C502.171 85.0774 499.568 87.8507 496.24 90.24C492.912 92.544 488.304 93.696 482.416 93.696ZM483.824 85.504C488.091 85.504 491.76 84.4374 494.832 82.304C497.904 80.1707 500.251 77.3974 501.872 73.984C503.579 70.5707 504.432 66.9867 504.432 63.232V61.952H486.896C480.581 61.952 476.101 63.0614 473.456 65.28C470.896 67.4987 469.616 70.3574 469.616 73.856C469.616 77.44 470.811 80.2987 473.2 82.432C475.589 84.48 479.131 85.504 483.824 85.504Z"/>
         </svg>
       </h1>
-
-      <div class="transport">
         <button id="play" class="play" title="Play / Stop">▶</button>
-        <button id="rec" class="small rec">● Rec</button>
+        <button id="rec" class="rec" title="Record master output">●</button>
         <button id="realign" class="small" title="snap every track back to step 0 of its loop (kills timing drift)">↺ Sync</button>
         <div class="field">
           <label for="bpm">BPM</label>
@@ -4270,6 +4408,7 @@
       name: overrides.name || defaultName(kind),
       steps: 16, pattern: [],
       volume: 0.8,
+      pan: 0,
       delaySend: 0, reverbSend: 0, chorusSend: 0, flangerSend: 0, bitcrushSend: 0, spaceEchoSend: 0,
       duckAmt: 0,
       mute: false, solo: false, armed: true,
@@ -5057,49 +5196,83 @@
     g.appendChild(row);
     return g;
   }
+  // Effects-mode parameter row: label · rotary · value. Step is applied as
+  // snap quantization inside the rotary onChange. Returns the row so callers
+  // that need to refresh the value externally can hold a reference to the
+  // dial via row._dial.
   function sideRow(parent, label, min, max, step, val, onChange, fmt) {
-    const row = el('div', 'row');
+    const row = el('div', 'row rotary-row');
     row.appendChild(el('label', null, label));
-    const r = el('input'); r.type='range'; r.min=min; r.max=max; r.step=step; r.value=val;
+    const v = el('span', 'v', fmt(val));
+    const quantize = (x) => {
+      if (!step) return x;
+      const snapped = Math.round((x - min) / step) * step + min;
+      return Math.max(min, Math.min(max, snapped));
+    };
+    const dial = makeRotary(min, max, val, (raw) => {
+      const x = quantize(raw);
+      v.textContent = fmt(x);
+      onChange(x);
+    }, fmt);
+    row.appendChild(dial);
+    row.appendChild(v);
+    row._dial   = dial;
+    row._valEl  = v;
+    row._fmt    = fmt;
+    parent.appendChild(row);
+    return row;
+  }
+  // Vertical fader variant — only used for the master volume so the user
+  // keeps a vertical fader feel for the loudest control on the page.
+  function sideRowVerticalVol(parent, label, val, onChange, fmt) {
+    const row = el('div', 'row vfader-row');
+    row.appendChild(el('label', null, label));
+    const wrap = el('div', 'vfader-wrap');
+    const r = el('input', 'vfader');
+    r.type = 'range'; r.min = 0; r.max = 1.2; r.step = 0.01; r.value = val;
     const v = el('span', 'v', fmt(val));
     r.addEventListener('input', () => {
       const x = parseFloat(r.value);
-      v.textContent = fmt(x); onChange(x);
+      v.textContent = fmt(x);
+      onChange(x);
     });
-    row.appendChild(r); row.appendChild(v);
+    wrap.appendChild(r);
+    wrap.appendChild(v);
+    row.appendChild(wrap);
     parent.appendChild(row);
+    return row;
   }
-  // Same as sideRow but adds an EQ-kill button that toggles the band between
-  // its current value and -15 dB. Used for master EQ low/mid/high.
+  // Same as sideRow but with an EQ-kill button that toggles the band between
+  // its current value and -40 dB.
   function sideRowEq(parent, label, val, onChange) {
-    const row = el('div', 'row eq-row');
+    const row = el('div', 'row eq-row rotary-row');
     row.appendChild(el('label', null, label));
-    const r = el('input'); r.type='range'; r.min=-15; r.max=15; r.step=0.5; r.value=val;
     const fmt = x => (x >= 0 ? '+' : '') + Number(x).toFixed(1);
     const v = el('span', 'v', fmt(val));
     let saved = val;
     let killed = false;
     const kill = el('button', 'eq-kill', '✕');
-    kill.title = 'kill this band (-15 dB)';
-    r.addEventListener('input', () => {
-      const x = parseFloat(r.value);
+    kill.title = 'kill this band (-40 dB)';
+    const dial = makeRotary(-40, 15, val, (x) => {
       if (killed) { killed = false; kill.classList.remove('on'); }
       saved = x;
       v.textContent = fmt(x);
       onChange(x);
-    });
+    }, fmt);
     kill.addEventListener('click', (e) => {
       e.preventDefault();
       killed = !killed;
       kill.classList.toggle('on', killed);
-      if (killed) { saved = parseFloat(r.value); r.value = -15; }
-      else { r.value = saved; }
-      const x = parseFloat(r.value);
+      const x = killed ? -40 : saved;
+      dial._setValue(x);
       v.textContent = fmt(x);
       onChange(x);
     });
-    row.appendChild(r); row.appendChild(v); row.appendChild(kill);
+    row.appendChild(dial);
+    row.appendChild(v);
+    row.appendChild(kill);
     parent.appendChild(row);
+    return row;
   }
 
   // ---------- waveform / scope ----------
@@ -8177,8 +8350,8 @@
       let saved = val;
       let killed = false;
       const kill = el('button', 'eq-kill', '✕');
-      kill.title = 'kill this band (-15 dB)';
-      const dial = makeRotary(-15, 15, val, (v) => {
+      kill.title = 'kill this band (-40 dB)';
+      const dial = makeRotary(-40, 15, val, (v) => {
         if (killed) { killed = false; kill.classList.remove('on'); }
         saved = v;
         valEl.textContent = fmtEq(v);
@@ -8188,7 +8361,7 @@
         e.preventDefault();
         killed = !killed;
         kill.classList.toggle('on', killed);
-        const v = killed ? -15 : saved;
+        const v = killed ? -40 : saved;
         if (!killed) saved = v;
         else saved = saved;          // keep last user value
         dial._setValue(v);
@@ -9646,7 +9819,7 @@
   function buildMaster() {
     const m = document.getElementById('master');
     m.appendChild(el('h2', null, 'Master'));
-    sideRow(m, 'Vol',  0, 1.2, 0.01, master.vol, v => {
+    sideRowVerticalVol(m, 'Vol', master.vol, v => {
       master.vol = v; if (masterOut) masterOut.gain.setTargetAtTime(v, audioCtx.currentTime, 0.01);
     }, v => v.toFixed(2));
     sideRowEq(m, 'Low',  master.low,  v => {
@@ -9689,30 +9862,28 @@
     m.appendChild(syncRow);
 
     // Time row (manually built so we can refresh display when sync mode changes)
-    const timeRow = el('div', 'row');
+    const timeRow = el('div', 'row rotary-row');
     timeRow.appendChild(el('label', null, 'Time'));
-    const timeSlider = el('input'); timeSlider.type = 'range';
-    timeSlider.min = 0.02; timeSlider.max = 1.5; timeSlider.step = 0.01;
     const currentT = delayCfg.sync ? computeDelaySync() : delayCfg.time;
-    timeSlider.value = currentT;
     const timeVal = el('span', 'v', currentT.toFixed(2));
-    timeSlider.addEventListener('input', () => {
+    const timeDial = makeRotary(0.02, 1.5, currentT, (raw) => {
       if (delayCfg.sync) {
-        timeSlider.value = computeDelaySync();
+        // Snap back to the synced value; the user can't override while synced.
+        timeDial._setValue(computeDelaySync());
         return;
       }
-      const v = parseFloat(timeSlider.value);
+      const v = Math.round(raw * 100) / 100;
       delayCfg.time = v;
       timeVal.textContent = v.toFixed(2);
       applyDelayTime();
-    });
-    timeRow.appendChild(timeSlider);
+    }, v => v.toFixed(2));
+    timeRow.appendChild(timeDial);
     timeRow.appendChild(timeVal);
     m.appendChild(timeRow);
 
     function refreshTimeDisplay() {
       const t = delayCfg.sync ? computeDelaySync() : delayCfg.time;
-      timeSlider.value = t;
+      timeDial._setValue(t);
       timeVal.textContent = t.toFixed(2);
     }
     delayCfg._refreshUI = refreshTimeDisplay;
@@ -9788,27 +9959,24 @@
     m.appendChild(syncRow);
 
     // Base time (H1)
-    const timeRow = el('div', 'row');
+    const timeRow = el('div', 'row rotary-row');
     timeRow.appendChild(el('label', null, 'Rate'));
-    const timeSlider = el('input'); timeSlider.type = 'range';
-    timeSlider.min = 0.04; timeSlider.max = 0.6; timeSlider.step = 0.005;
     const startT = spaceEchoCfg.sync ? computeSpaceBase() : spaceEchoCfg.baseTime;
-    timeSlider.value = startT;
     const timeVal = el('span', 'v', startT.toFixed(3));
-    timeSlider.addEventListener('input', () => {
-      if (spaceEchoCfg.sync) { timeSlider.value = computeSpaceBase(); return; }
-      const v = parseFloat(timeSlider.value);
+    const timeDial = makeRotary(0.04, 0.6, startT, (raw) => {
+      if (spaceEchoCfg.sync) { timeDial._setValue(computeSpaceBase()); return; }
+      const v = Math.round(raw * 200) / 200;   // 0.005 step
       spaceEchoCfg.baseTime = v;
       timeVal.textContent = v.toFixed(3);
       applySpaceEchoTimes();
-    });
-    timeRow.appendChild(timeSlider);
+    }, v => v.toFixed(3));
+    timeRow.appendChild(timeDial);
     timeRow.appendChild(timeVal);
     m.appendChild(timeRow);
 
     function refreshSpaceTimeUI() {
       const t = spaceEchoCfg.sync ? computeSpaceBase() : spaceEchoCfg.baseTime;
-      timeSlider.value = t;
+      timeDial._setValue(t);
       timeVal.textContent = t.toFixed(3);
     }
     spaceEchoCfg._refreshUI = refreshSpaceTimeUI;
@@ -10217,7 +10385,7 @@
     t.deckGainN.gain.value = deckGainFor(t.deck);
     t.volNode      = audioCtx.createGain();   t.volNode.gain.value      = t.volume;
     t.trkLfoMod    = audioCtx.createGain();   t.trkLfoMod.gain.value    = 1; // tremolo carrier
-    t.trkPanNode   = audioCtx.createStereoPanner(); t.trkPanNode.pan.value = 0;
+    t.trkPanNode   = audioCtx.createStereoPanner(); t.trkPanNode.pan.value = t.pan || 0;
     // 3-band channel EQ (shown on the Mix tab strip)
     t.trkEqLow  = audioCtx.createBiquadFilter(); t.trkEqLow.type ='lowshelf';  t.trkEqLow.frequency.value  = 200;  t.trkEqLow.gain.value  = t.eqLow  || 0;
     t.trkEqMid  = audioCtx.createBiquadFilter(); t.trkEqMid.type ='peaking';   t.trkEqMid.frequency.value  = 1000; t.trkEqMid.Q.value = 0.8; t.trkEqMid.gain.value = t.eqMid || 0;
@@ -10325,6 +10493,10 @@
     const t = makeTrack(kind, overrides);
     tracks.push(t);
     if (audioCtx) initTrackAudio(t);
+    // Always sync the new track to the first track's next downbeat so the
+    // user doesn't have to press the per-track sync button after every add.
+    // syncTrackToFirst is a no-op when this is the only track.
+    if (audioCtx && isPlaying) syncTrackToFirst(t);
     selectedTrackId = t.id;  // auto-focus the newly added instrument
     rebuildTracksUI();
     rebuildDuckerSourceOptions();
@@ -10530,7 +10702,7 @@
     // Track volume + the per-track sends are channel-mix values the user
     // sets independently of the patch. Keeping them out of the morph means
     // moving the slider only changes the instrument character.
-    'volume','delaySend','reverbSend','chorusSend','flangerSend','bitcrushSend','spaceEchoSend','duckAmt'
+    'volume','pan','delaySend','reverbSend','chorusSend','flangerSend','bitcrushSend','spaceEchoSend','duckAmt'
   ]);
 
   function captureMorphState(track) {
@@ -10811,6 +10983,9 @@
                   rebuildSteps(t);
                 }
               }));
+            seqActs.appendChild(mkSeq('↻',
+              "Sync this track to the first track's next downbeat",
+              () => syncTrackToFirst(t)));
             nameRow.appendChild(seqActs);
             const previewBtn = el('button', 'small pattern-preview', '▶ Preview');
             previewBtn.title = 'Trigger this patch once without dropping a step';
@@ -10841,6 +11016,29 @@
           if (selectedTrackId !== t.id) { selectedTrackId = t.id; rebuildTracksUI(); }
         });
         mc.appendChild(el('div', 'mini-channel-name', t.name));
+
+        // Pan slider — horizontal L/C/R control above the EQ. Reads/writes
+        // track.pan and the trkPanNode AudioParam (which is also modulated
+        // by the track LFO; the LFO sums on top of this static offset).
+        const panRow = el('div', 'mini-pan-row');
+        panRow.appendChild(el('span', 'pan-label', 'PAN'));
+        const panSlider = el('input', 'mini-pan');
+        panSlider.type = 'range'; panSlider.min = -1; panSlider.max = 1; panSlider.step = 0.01;
+        panSlider.value = t.pan || 0;
+        const panVal = el('span', 'pan-val', panLabel(t.pan || 0));
+        panSlider.addEventListener('input', () => {
+          const v = parseFloat(panSlider.value);
+          t.pan = v;
+          panVal.textContent = panLabel(v);
+          if (t.trkPanNode && audioCtx) t.trkPanNode.pan.setTargetAtTime(v, audioCtx.currentTime, 0.01);
+        });
+        panSlider.addEventListener('dblclick', () => {
+          panSlider.value = 0;
+          panSlider.dispatchEvent(new Event('input'));
+        });
+        panRow.appendChild(panSlider);
+        panRow.appendChild(panVal);
+        mc.appendChild(panRow);
 
         // Move the EQ wrap and the meter+fader strip out of the .track wrap
         // (built by buildTrack) into this mini-channel. The sends row stays
@@ -10991,6 +11189,21 @@
   // (faint off / full on) so the scale is always visible.
   function buildSegmentedMeter(numSegs) {
     if (!numSegs) numSegs = 14;
+    const wrap = el('div', 'mix-meter-wrap');
+    // Left-column dB scale — peak * 1.3 maps to full meter (≈ 0 dB top),
+    // so we tag the segment whose threshold matches each label.
+    const scale = el('div', 'mix-meter-scale');
+    const labels = [0, -6, -12, -24];
+    labels.forEach(db => {
+      const linear = Math.pow(10, db / 20);
+      let pos = linear * 1.3;                      // 0..1 from bottom
+      pos = Math.max(0, Math.min(1, pos));
+      const tickPct = (1 - pos) * 100;             // CSS top % (0 = top)
+      const tick = el('div', 'mix-meter-tick', db === 0 ? '0' : String(db));
+      tick.style.top = tickPct.toFixed(1) + '%';
+      scale.appendChild(tick);
+    });
+    wrap.appendChild(scale);
     const m = el('div', 'mix-meter');
     const segs = [];
     for (let i = 0; i < numSegs; i++) {
@@ -11013,7 +11226,8 @@
       m.appendChild(seg);
       segs.push(seg);
     }
-    return { meter: m, segs };
+    wrap.appendChild(m);
+    return { meter: wrap, segs };
   }
   function setMeterSegs(segs, peak) {
     if (!segs || !segs.length) return;
@@ -11055,6 +11269,13 @@
   }
 
   // ---------- master channel strip (Mix tab) ----------
+  // "L40" / "C" / "R65" style readout for a stereo pan value in [-1, 1].
+  function panLabel(v) {
+    const n = Math.round(Math.abs(v) * 100);
+    if (n === 0) return 'C';
+    return (v < 0 ? 'L' : 'R') + n;
+  }
+
   function buildMasterStrip() {
     const wrap = el('div', 'track master-strip');
     const meta = el('div', 'track-meta');
@@ -11072,8 +11293,8 @@
       let saved = val;
       let killed = false;
       const kill = el('button', 'eq-kill', '✕');
-      kill.title = 'kill this band (-15 dB)';
-      const dial = makeRotary(-15, 15, val, (v) => {
+      kill.title = 'kill this band (-40 dB)';
+      const dial = makeRotary(-40, 15, val, (v) => {
         if (killed) { killed = false; kill.classList.remove('on'); }
         saved = v;
         valEl.textContent = fmtMEq(v);
@@ -11083,7 +11304,7 @@
         e.preventDefault();
         killed = !killed;
         kill.classList.toggle('on', killed);
-        const v = killed ? -15 : saved;
+        const v = killed ? -40 : saved;
         dial._setValue(v);
         valEl.textContent = fmtMEq(v);
         onChange(v);
@@ -11305,7 +11526,7 @@
 
   // ---------- save / load ----------
   const SAVE_KEYS = {
-    common: ['name','kind','steps','pattern','volume','mute','solo','armed','group','swing','mono','noteLen','expanded',
+    common: ['name','kind','steps','pattern','volume','pan','mute','solo','armed','group','swing','mono','noteLen','expanded',
              'eqLow','eqMid','eqHigh',
              'delaySend','reverbSend','chorusSend','flangerSend','bitcrushSend','spaceEchoSend','duckAmt',
              'trkLfoRate','trkLfoShape','trkLfoVolDepth','trkLfoPanDepth','trkLfoCutDepth','trkLpfCutoff',
@@ -11885,8 +12106,8 @@
       let saved = initial;
       let killed = false;
       const kill = el('button', 'eq-kill', '✕');
-      kill.title = 'kill this band (-15 dB)';
-      const dial = makeRotary(-15, 15, initial, (v) => {
+      kill.title = 'kill this band (-40 dB)';
+      const dial = makeRotary(-40, 15, initial, (v) => {
         if (killed) { killed = false; kill.classList.remove('on'); }
         saved = v;
         valEl.textContent = fmtEqDb(v);
@@ -11896,7 +12117,7 @@
         e.preventDefault();
         killed = !killed;
         kill.classList.toggle('on', killed);
-        const v = killed ? -15 : saved;
+        const v = killed ? -40 : saved;
         dial._setValue(v);
         valEl.textContent = fmtEqDb(v);
         applyDeckEqBand(deck, band, v);
@@ -11928,14 +12149,14 @@
       let saved = initial;
       let killed = false;
       const kill = el('button', 'live-master-kill', '✕');
-      kill.title = 'Kill this band (-15 dB)';
+      kill.title = 'Kill this band (-40 dB)';
       const apply = (v) => {
         master[prop] = v;
         valEl.textContent = fmt(v);
         const n = getNode();
         if (n && audioCtx) n.gain.setTargetAtTime(v, audioCtx.currentTime, 0.02);
       };
-      const dial = makeRotary(-15, 15, initial, (v) => {
+      const dial = makeRotary(-40, 15, initial, (v) => {
         if (killed) { killed = false; kill.classList.remove('on'); }
         saved = v;
         apply(v);
@@ -11944,7 +12165,7 @@
         e.preventDefault();
         killed = !killed;
         kill.classList.toggle('on', killed);
-        const v = killed ? -15 : saved;
+        const v = killed ? -40 : saved;
         dial._setValue(v);
         apply(v);
       });
@@ -12206,12 +12427,12 @@
     };
     mediaRecorder.start();
     recBtn.classList.add('on');
-    recBtn.textContent = '■ Stop';
+    recBtn.textContent = '■';
   }
   function stopRecording() {
     if (mediaRecorder && mediaRecorder.state === 'recording') mediaRecorder.stop();
     recBtn.classList.remove('on');
-    recBtn.textContent = '● Rec';
+    recBtn.textContent = '●';
   }
   recBtn.addEventListener('click', () => {
     if (mediaRecorder && mediaRecorder.state === 'recording') stopRecording();
