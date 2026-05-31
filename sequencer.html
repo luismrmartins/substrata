@@ -84,22 +84,40 @@
      If the row is wider than the viewport, scroll horizontally — no
      module ever wraps to a second row.
 
-     Side height accounts for:
-       - body padding-top (18px) + transport row (~60px) above
-       - body padding-bottom on this mode (240 px when the decks mixer is
-         open, 40 px when it's collapsed). The variable is flipped by
-         the .mixer-collapsed body class.
-     so the panel never overlaps the bottom-fixed decks mixer or makes
-     the page scroll vertically. */
+     In effects mode the body becomes a flex column locked to the
+     viewport, so .side genuinely fills the leftover space (the bottom
+     padding reserved for the fixed decks mixer is still respected via
+     padding-bottom on body). No more guess-the-overhead calc, no more
+     whitespace gap below the cards. */
   body.mode-effects { --side-bottom: 240px; }
   body.mode-effects.mixer-collapsed { --side-bottom: 40px; }
+  body.mode-effects {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    box-sizing: border-box;
+    overflow: hidden;
+  }
+  body.mode-effects .layout {
+    flex: 1 1 auto;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 24px;
+  }
+  body.mode-effects main {
+    flex: 0 0 auto;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+  }
   body.mode-effects .side {
+    flex: 1 1 auto;
+    min-height: 0;
     display: flex;
     flex-direction: row;
     gap: 12px;
     align-items: stretch;
-    height: calc(100vh - 90px - var(--side-bottom));
-    min-height: 280px;
     overflow-x: auto;
     overflow-y: hidden;
   }
