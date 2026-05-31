@@ -1259,18 +1259,29 @@
     margin-top: 8px;
   }
   .morph-buttons .small { flex: 1; }
+  /* Morph cell: label on top, A/B/C ticks immediately above the slider,
+     slider on the bottom. Stacking matches the user's mental model
+     (the dots are slot positions on the slider). */
   body.mode-live .live-morph-row {
     display: flex;
-    flex-direction: row;
-    align-items: center;
-    gap: 6px;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 2px;
     margin-top: 0;
-    width: auto;
+    width: 140px;
     flex-shrink: 0;
   }
-  body.mode-live .live-morph-row .live-feature-label { margin: 0; }
-  body.mode-live .live-morph-row .morph-slider { width: 110px; height: 12px; flex: 0 0 auto; }
-  body.mode-live .live-morph-row .morph-ticks { display: flex; margin: 0; }
+  body.mode-live .live-morph-row .live-feature-label { margin: 0 0 2px 0; }
+  body.mode-live .live-morph-row .morph-ticks {
+    display: flex;
+    justify-content: space-between;
+    margin: 0 6px;
+    padding: 0 2px;
+  }
+  body.mode-live .live-morph-row .morph-slider {
+    width: 100%;
+    height: 12px;
+  }
   body.mode-live .live-morph-row .morph-buttons { display: none; }
   body.mode-live .live-morph-row .morph-ticks { margin: 0 2px; }
   body.mode-live .add-row,
@@ -1769,7 +1780,11 @@
       "volume volume   morphs";
     column-gap: 14px;
     row-gap: 4px;
-    align-items: center;
+    /* align-items: start keeps sections + tools on the same baseline as
+       the track-name text. Without this they'd centre vertically inside
+       the row, sitting between the name and the playhead bar that lives
+       under it (the user complaint: "buttons are in between"). */
+    align-items: start;
     border: 1px solid var(--line);
     border-radius: 3px;
     padding: 6px 10px;
@@ -1778,11 +1793,10 @@
   }
   body.mode-live .track + .track { margin-top: 3px; }
   /* Drop the now-redundant per-cell labels on Tools + Volume — the
-     content (toggle icons, fader) is self-evident. Morph label stays
-     because the morph slider alone isn't obvious. */
+     content (toggle icons, fader) is self-evident. The Sequences label
+     stays visible. */
   body.mode-live .live-cell-tools .live-feature-label,
-  body.mode-live .live-cell-volume .live-feature-label,
-  body.mode-live .live-sections-inline > .live-feature-label:first-child { display: none; }
+  body.mode-live .live-cell-volume .live-feature-label { display: none; }
   body.mode-live .live-cell-name     { grid-area: name; align-self: center; }
   body.mode-live .live-cell-sections { grid-area: sections; }
   body.mode-live .live-cell-tools    { grid-area: tools; }
@@ -11681,7 +11695,7 @@
         let sectionsBlock = null;
         if (t.kind !== 'mic') {
           sectionsBlock = el('div', 'live-sections-inline');
-          sectionsBlock.appendChild(el('div', 'live-feature-label', 'Sections'));
+          sectionsBlock.appendChild(el('div', 'live-feature-label', 'Sequences'));
           sectionsBlock.appendChild(buildPatternBankSelector(t));
           sectionsBlock.appendChild(el('div', 'live-feature-label live-feature-label-inline', 'Groups'));
           sectionsBlock.appendChild(buildGroupSelector(t));
