@@ -1263,13 +1263,14 @@
     display: flex;
     flex-direction: row;
     align-items: center;
-    gap: 4px;
+    gap: 6px;
     margin-top: 0;
-    width: 130px;
+    width: auto;
     flex-shrink: 0;
   }
-  body.mode-live .live-morph-row .morph-slider { flex: 1; height: 12px; }
-  body.mode-live .live-morph-row .morph-ticks { display: none; }
+  body.mode-live .live-morph-row .live-feature-label { margin: 0; }
+  body.mode-live .live-morph-row .morph-slider { width: 110px; height: 12px; flex: 0 0 auto; }
+  body.mode-live .live-morph-row .morph-ticks { display: flex; margin: 0; }
   body.mode-live .live-morph-row .morph-buttons { display: none; }
   body.mode-live .live-morph-row .morph-ticks { margin: 0 2px; }
   body.mode-live .add-row,
@@ -1754,30 +1755,33 @@
     gap: 4px;
     min-height: 80px;
   }
-  /* Single-row channel strip — collapses the old two-row grid into one
-     line so each track is as short as possible. Order across the row:
-     name + playhead, pattern banks + groups, tools toggles, volume,
-     morphs. */
+  /* Two-row channel strip:
+       Row 1: name + playhead | sections (banks + groups) | tools
+              (arm/mute/solo/randomize/sync/nudge)
+       Row 2: volume                                       | morphs
+     Tools cell hugs the right edge so the toggles sit just after the
+     groups; volume + morphs share the lower row. */
   body.mode-live .track {
     display: grid !important;
-    grid-template-columns: minmax(150px, max-content) auto auto minmax(120px, 1fr) auto;
-    grid-template-areas: "name sections tools volume morphs";
+    grid-template-columns: minmax(150px, max-content) minmax(0, 1fr) auto;
+    grid-template-areas:
+      "name   sections tools"
+      "volume volume   morphs";
     column-gap: 14px;
-    row-gap: 0;
+    row-gap: 4px;
     align-items: center;
     border: 1px solid var(--line);
     border-radius: 3px;
-    padding: 4px 10px;
+    padding: 6px 10px;
     overflow: hidden;
     width: 100%;
   }
   body.mode-live .track + .track { margin-top: 3px; }
-  /* Drop the per-cell labels (Tools / Volume / Morphs) in the new
-     single-line layout — every cell is now self-evidently labelled by
-     its content (toggle icons, fader, morph slider). */
+  /* Drop the now-redundant per-cell labels on Tools + Volume — the
+     content (toggle icons, fader) is self-evident. Morph label stays
+     because the morph slider alone isn't obvious. */
   body.mode-live .live-cell-tools .live-feature-label,
   body.mode-live .live-cell-volume .live-feature-label,
-  body.mode-live .live-cell-morphs .live-feature-label,
   body.mode-live .live-sections-inline > .live-feature-label:first-child { display: none; }
   body.mode-live .live-cell-name     { grid-area: name; align-self: center; }
   body.mode-live .live-cell-sections { grid-area: sections; }
