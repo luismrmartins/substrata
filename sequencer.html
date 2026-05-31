@@ -81,46 +81,34 @@
   }
   /* Side effects panel only shows on the Effects tab */
   .side { display: none; }
-  /* Three columns:
-     - left  : FX-rack presets (sticky)
-     - mid   : every effect / processor module, two dials per row
-     - right : master strip, full-height. */
+  /* Effects layout: every block (fx-racks · effect modules · master) is a
+     full-height card sitting side-by-side in a single horizontal flex row.
+     If the row is wider than the viewport, scroll horizontally — no
+     module ever wraps to a second row. */
   body.mode-effects .side {
-    display: grid;
-    grid-template-columns: 220px minmax(0, 1fr) 220px;
-    gap: 24px;
+    display: flex;
+    flex-direction: row;
+    gap: 12px;
     align-items: stretch;
-  }
-  body.mode-effects #fx-racks {
-    grid-column: 1;
-    grid-row: 1 / -1;
-    position: sticky;
-    top: 16px;
-    align-self: start;
-  }
-  body.mode-effects #master {
-    grid-column: 3;
-    grid-row: 1 / -1;
-    position: sticky;
-    top: 16px;
-    align-self: start;
-    /* Cap to the viewport so the bottom of the master (with its vertical
-       fader) is always visible no matter how tall the page becomes. */
     height: calc(100vh - 32px);
+    overflow-x: auto;
+    overflow-y: hidden;
   }
-  /* Each section is its own auto-fit grid; pinned to the middle column. */
-  body.mode-effects .fx-section {
-    grid-column: 2;
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-    gap: 18px;
-    align-items: stretch;
-  }
-  /* Every effect card — and the master — shares the same shell so the
-     Effects view feels uniform: framed box, knobs at the top, vertical
-     fader pinned at the bottom via margin-top: auto. */
-  body.mode-effects .fx-section .module,
-  body.mode-effects #master {
+  /* .fx-section is the original HTML grouping (Mastering / Filters /
+     Sends). In this layout the section box itself isn't rendered as a
+     box — display: contents flattens it so its .module children become
+     direct flex children of .side, side-by-side with fx-racks + master. */
+  body.mode-effects .fx-section { display: contents; }
+
+  /* Order pin: fx-racks always leftmost, master always rightmost. The
+     order keyword overrides the HTML source order. */
+  body.mode-effects #fx-racks { order: -10; position: static; top: auto; align-self: stretch; }
+  body.mode-effects #master   { order:  10; position: static; top: auto; align-self: stretch; height: auto; }
+
+  /* Every block — fx-racks, every effect module, master — shares the
+     same card shell. Fixed width (no flex grow), full row height. */
+  body.mode-effects .module {
+    flex: 0 0 220px;
     display: flex;
     flex-direction: column;
     gap: 10px;
@@ -128,47 +116,35 @@
     border-radius: 4px;
     padding: 14px 14px 18px;
     background: var(--bg);
-    min-height: 380px;
+    min-height: 0;
+    height: auto;
     box-sizing: border-box;
+    overflow-y: auto;
   }
   body.mode-effects .module h2 { margin: 0 0 4px; padding: 0; border: none; font-size: 11px; }
-  /* Top knobs area — laid out 2-up so common pairs (Time + Fbk, Rate +
-     Dep, Att + Rel, ...) sit on one row. Selector / sync rows still get
-     full width via .row.wide. */
+  /* Top knobs area — single column for breathing room now that each
+     card is a tall narrow strip. Selector / sync rows still get full
+     width via .row.wide. */
   body.mode-effects .module .fx-top {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    column-gap: 12px;
-    row-gap: 2px;
-    align-content: start;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
   }
-  body.mode-effects .module .fx-top > .row.wide { grid-column: 1 / -1; }
   /* Vertical fader pinned to the bottom of every card. */
   body.mode-effects .module > .row.vfader-row { margin-top: auto; }
-  /* In the 2-up top area each cell is ~half the module width, so shrink
-     the row's label/value columns to fit a (label, dial, value) row. */
+  /* Each row inside the .fx-top knobs area — narrow card means we go
+     back to the standard label / dial / value layout. */
   body.mode-effects .module .fx-top > .row.rotary-row {
-    grid-template-columns: 40px auto minmax(0, 1fr);
-    column-gap: 6px;
+    grid-template-columns: 50px auto minmax(0, 1fr);
+    column-gap: 8px;
   }
   body.mode-effects .module .fx-top > .row.eq-row.rotary-row {
-    grid-template-columns: 40px auto minmax(0, 1fr) 18px;
+    grid-template-columns: 50px auto minmax(0, 1fr) 20px;
   }
-  body.mode-effects .module .fx-top > .row label { font-size: 9px; }
-  /* Master column is narrower than the auto-fit fx-section cells, so
-     stack its rows one-per-line for breathing room. */
-  body.mode-effects #master .fx-top { grid-template-columns: 1fr; }
-  body.mode-effects #master .fx-top > .row.rotary-row {
-    grid-template-columns: 56px auto 1fr;
-    column-gap: 10px;
-  }
-  body.mode-effects #master .fx-top > .row.eq-row.rotary-row {
-    grid-template-columns: 56px auto 1fr 20px;
-  }
-  body.mode-effects #master .fx-top > .row label { font-size: 10px; }
-  /* Vertical fader — centered column (label · slider · value) so the
-     fader reads as a single stack at the bottom of every card. Same
-     pixel height across every module so the baselines line up. */
+  body.mode-effects .module .fx-top > .row label { font-size: 10px; }
+  /* Vertical fader — centered column (label · slider · value). Slider
+     height tracks 60% of the card's content area so the fader always
+     dominates the bottom of every block regardless of viewport size. */
   body.mode-effects .module .row.vfader-row {
     display: flex;
     flex-direction: column;
@@ -191,7 +167,10 @@
   }
   body.mode-effects .module .vfader {
     width: 24px;
-    height: 200px;
+    /* 60% of the side panel height (≈ 60% of every card) — guarantees
+       the slider is the visual focus at the bottom of each block. */
+    height: calc((100vh - 32px) * 0.6);
+    min-height: 200px;
     -webkit-appearance: slider-vertical;
     appearance: slider-vertical;
     writing-mode: bt-lr;
@@ -204,16 +183,19 @@
     font-size: 10px;
   }
   @media (max-width: 900px) {
-    /* On narrow viewports collapse to a single column. Master returns to
-       the normal flow at the bottom of the column. */
+    /* On narrow viewports drop the side-by-side card row and let the
+       blocks stack vertically with a normal page scroll. */
     body.mode-effects .side {
-      grid-template-columns: 1fr;
+      flex-direction: column;
+      height: auto;
+      overflow-x: hidden;
+      overflow-y: visible;
+      align-items: stretch;
     }
-    body.mode-effects #fx-racks,
-    body.mode-effects #master,
-    body.mode-effects .fx-section {
-      grid-column: 1;
-      position: static;
+    body.mode-effects .module {
+      flex: 0 0 auto;
+      width: 100%;
+      min-height: 320px;
     }
   }
   body.mode-effects .fx-section-title {
