@@ -116,9 +116,10 @@
 
   /* Every block — fx-racks, every effect module, master — shares the
      same card shell. Fixed width (70 % of the previous 220 px → 154 px),
-     full row height. */
+     stretched to the full side height. */
   body.mode-effects .module {
     flex: 0 0 154px;
+    align-self: stretch;
     display: flex;
     flex-direction: column;
     gap: 10px;
@@ -127,9 +128,9 @@
     padding: 12px 10px 14px;
     background: var(--bg);
     min-height: 0;
-    height: auto;
+    height: 100%;
     box-sizing: border-box;
-    overflow-y: auto;
+    overflow: hidden;
   }
   body.mode-effects .module h2 { margin: 0 0 4px; padding: 0; border: none; font-size: 11px; }
   /* Top knobs area — single column for breathing room now that each
@@ -1700,8 +1701,88 @@
     flex-direction: row;
     align-items: center;
     gap: 8px;
+    flex-wrap: wrap;
   }
   body.mode-live .live-sections-inline .live-feature-label { margin: 0; }
+  body.mode-live .live-sections-inline .live-feature-label-inline {
+    border-left: 1px solid var(--line);
+    padding-left: 10px;
+  }
+  /* Mini sequence playhead next to the track name in Live mode. Thin
+     bar with a moving cursor that snaps to the current step so the
+     user can time arm/unarm to the loop. */
+  body.mode-live .live-name-wrap {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 120px;
+  }
+  body.mode-live .live-seq-progress {
+    position: relative;
+    height: 4px;
+    width: 100%;
+    background: var(--cell-border);
+    border-radius: 2px;
+    overflow: hidden;
+  }
+  body.mode-live .live-seq-progress-cursor {
+    position: absolute;
+    top: 0;
+    left: 0;
+    height: 100%;
+    width: 6px;
+    background: var(--accent);
+    border-radius: 2px;
+    transition: left 60ms linear;
+  }
+  /* 4-slot group selector. Each button is small (~18px) so a row of
+     four fits compactly next to the pattern banks in Live mode or
+     under the sections in Track mode. */
+  .group-selector {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+  }
+  .group-btn {
+    width: 18px;
+    height: 18px;
+    border: 1px solid var(--cell-border);
+    background: transparent;
+    color: var(--muted);
+    font: inherit;
+    font-size: 9px;
+    line-height: 1;
+    padding: 0;
+    cursor: pointer;
+    border-radius: 2px;
+    user-select: none;
+  }
+  .group-btn:hover { border-color: var(--text); color: var(--text); }
+  .group-btn.member {
+    background: var(--accent);
+    color: #fff;
+    border-color: var(--accent);
+  }
+  .group-btn.member.disarmed {
+    background: transparent;
+    color: var(--accent);
+    border-color: var(--accent);
+    opacity: 0.6;
+  }
+  /* Groups row in the Track-mode sequencer header — sits below the
+     panel-track-name-row (which holds the pattern banks / sections). */
+  .panel-groups-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 10px;
+  }
+  .panel-groups-label {
+    font-size: 10px;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+  }
   body.mode-live .track-meta {
     display: flex !important;
     flex-direction: row;
@@ -4674,6 +4755,11 @@
       duckAmt: 0,
       mute: false, solo: false, armed: true,
       group: 0,
+      // 4-slot multi-membership groups. Each entry is a boolean: true =
+      // this track belongs to that group. Lets the user arm/disarm
+      // arbitrary stacks at once and overlap memberships to nest groups
+      // (e.g. a hi-hat in both "drums" and "hats").
+      groups: [false, false, false, false],
       swing: 0,
       mono: false,
       eqLow: 0, eqMid: 0, eqHigh: 0,
@@ -4840,6 +4926,11 @@
         break;
     }
     const t = { ...base, ...specific, ...overrides };
+    // Normalise the 4-slot groups array — old projects saved before
+    // groups existed would otherwise come back without it.
+    if (!Array.isArray(t.groups) || t.groups.length !== 4) {
+      t.groups = [false, false, false, false];
+    }
     // restore voice references that may be lost via serialization
     if (t.kind === 'drum')   t.voice = DRUM_VOICES[t.voiceType] || DRUM_VOICES.kick;
     if (t.kind === 'bass')   t.voice = vBass;
@@ -5945,6 +6036,78 @@
     }
     refreshAllToggleBtns();
     if (!deferred) refreshMicGates();
+  }
+  // ---------- 4-slot Groups ----------
+  // Per-track membership in up to 4 groups (multi-membership lets the
+  // user nest — e.g. a hi-hat in both "drums" and "hats"). groupArmed
+  // is the live arm/disarm state for each group; clicking a group
+  // button on any track that's a member toggles the whole group at
+  // once, deferred to the next downbeat in Live / Mix modes.
+  const groupArmed = [true, true, true, true];
+  function applyGroupArm(groupIdx) {
+    const armed = groupArmed[groupIdx];
+    const deferred = currentMode === 'live' || currentMode === 'mixing';
+    for (const t of tracks) {
+      if (!t.groups || !t.groups[groupIdx]) continue;
+      if (deferred) {
+        t._pendingArmed = (armed === t.armed) ? undefined : armed;
+      } else {
+        t.armed = armed;
+        t._pendingArmed = undefined;
+      }
+    }
+    refreshAllToggleBtns();
+    if (!deferred) refreshMicGates();
+  }
+  function updateGroupBtn(btn, track, idx) {
+    if (!track.groups) track.groups = [false, false, false, false];
+    const member = !!track.groups[idx];
+    const armed = groupArmed[idx];
+    btn.classList.toggle('member', member);
+    btn.classList.toggle('disarmed', member && !armed);
+  }
+  function refreshAllGroupBtns() {
+    document.querySelectorAll('.group-selector').forEach(sel => {
+      const tid = parseInt(sel.dataset.trackId, 10);
+      const track = tracks.find(t => t.id === tid);
+      if (!track) return;
+      sel.querySelectorAll('.group-btn').forEach(btn => {
+        const idx = parseInt(btn.dataset.group, 10);
+        updateGroupBtn(btn, track, idx);
+      });
+    });
+  }
+  function buildGroupSelector(track) {
+    if (!track.groups) track.groups = [false, false, false, false];
+    const wrap = el('div', 'group-selector');
+    wrap.dataset.trackId = String(track.id);
+    for (let i = 0; i < 4; i++) {
+      const btn = el('button', 'group-btn', String(i + 1));
+      btn.dataset.group = String(i);
+      btn.title = 'Group ' + (i + 1) + ' — click: ' +
+        'join group / toggle whole-group arm; alt-click or right-click: toggle membership';
+      updateGroupBtn(btn, track, i);
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (e.altKey || e.shiftKey) {
+          track.groups[i] = !track.groups[i];
+        } else if (!track.groups[i]) {
+          track.groups[i] = true;
+        } else {
+          groupArmed[i] = !groupArmed[i];
+          applyGroupArm(i);
+        }
+        refreshAllGroupBtns();
+      });
+      btn.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        track.groups[i] = !track.groups[i];
+        refreshAllGroupBtns();
+      });
+      wrap.appendChild(btn);
+    }
+    return wrap;
   }
   function setSoloAcross(track, val) {
     const targets = (track.group > 0)
@@ -9804,18 +9967,33 @@
   }
 
   function highlightStep(track, idx) {
-    if (!track.stepsEl) return;
     if (track._cursorIdx === idx) return;
+    track._cursorIdx = idx;
+    // Live-mode mini playhead — runs even when the step grid isn't
+    // rendered so the bar still tracks the loop.
+    updateLiveSeqCursor(track);
+    if (!track.stepsEl) return;
     const cols = track.stepsEl.children;
-    if (track._cursorIdx >= 0 && track._cursorIdx < cols.length) {
-      const oldCol = cols[track._cursorIdx];
+    if (typeof track._prevCursorIdx === 'number' && track._prevCursorIdx !== idx) {
+      const oldCol = cols[track._prevCursorIdx];
       if (oldCol && oldCol.firstChild) oldCol.firstChild.classList.remove('cursor');
     }
     if (idx >= 0 && idx < cols.length) {
       const newCol = cols[idx];
       if (newCol && newCol.firstChild) newCol.firstChild.classList.add('cursor');
     }
-    track._cursorIdx = idx;
+    track._prevCursorIdx = idx;
+  }
+  // Move the Live-mode mini playhead next to the track name to the
+  // current step position. Called from highlightStep on every scheduler
+  // tick so the bar tracks the loop in real time.
+  function updateLiveSeqCursor(track) {
+    const cursor = track._liveSeqCursor;
+    if (!cursor || !cursor.isConnected) return;
+    const len = (track.pattern && track.pattern.length) || track.steps || 16;
+    const idx = (typeof track._cursorIdx === 'number' && track._cursorIdx >= 0) ? track._cursorIdx : 0;
+    const pos = ((idx % len) / len) * 100;
+    cursor.style.left = pos.toFixed(2) + '%';
   }
 
   // ---------- FX rack presets ----------
@@ -10983,7 +11161,7 @@
     'name','kind','voice','voiceType','wave','waveA','waveB',
     'steps','pattern','expanded',
     'mute','solo','armed','mono','group','noteLen',
-    'sampleFile','buffer','deviceId','enabled','eqBands','pads','selectedPad',
+    'sampleFile','buffer','deviceId','enabled','eqBands','pads','selectedPad','groups',
     'scale','seventh','ninth','subOctave','lfoShape','trkLfoShape','div','sync',
     'morphStates','morphPos','deck','_pendingMute','_pendingArmed',
     // Track volume + the per-track sends are channel-mix values the user
@@ -11280,6 +11458,13 @@
             nameRow.appendChild(previewBtn);
           }
           seqPanel.appendChild(nameRow);
+          // Groups row sits below the sections (per spec). Mic tracks
+          // can also belong to groups, so this row is shown for every
+          // track kind.
+          const groupsRow = el('div', 'panel-groups-row');
+          groupsRow.appendChild(el('span', 'panel-groups-label', 'Groups'));
+          groupsRow.appendChild(buildGroupSelector(t));
+          seqPanel.appendChild(groupsRow);
           if (knobs && t.kind !== 'mic' && knobs.firstElementChild) {
             const std = knobs.firstElementChild;
             const header = el('div', 'panel-seq-header');
@@ -11394,13 +11579,32 @@
           morphRow.insertBefore(el('div', 'live-feature-label', 'Morphs'), morphRow.firstChild);
         }
 
-        // Build the Sections inline block (label + banks) for non-mic tracks.
+        // Build the Sections inline block (label + banks + group toggles)
+        // for non-mic tracks. Groups sit next to the pattern banks per the
+        // spec — same row so they're always one glance from the user.
         const nameEl = wrap.querySelector('.track-name');
         let sectionsBlock = null;
         if (t.kind !== 'mic') {
           sectionsBlock = el('div', 'live-sections-inline');
           sectionsBlock.appendChild(el('div', 'live-feature-label', 'Sections'));
           sectionsBlock.appendChild(buildPatternBankSelector(t));
+          sectionsBlock.appendChild(el('div', 'live-feature-label live-feature-label-inline', 'Groups'));
+          sectionsBlock.appendChild(buildGroupSelector(t));
+        }
+
+        // Sequence-position playhead bar — sits next to the track name in
+        // Live mode so the user can time arm/unarm to the loop. Updated
+        // by highlightStep on every scheduled step.
+        let nameWithBar = nameEl;
+        if (nameEl && t.kind !== 'mic') {
+          nameWithBar = el('div', 'live-name-wrap');
+          nameWithBar.appendChild(nameEl);
+          const bar = el('div', 'live-seq-progress');
+          const cursor = el('div', 'live-seq-progress-cursor');
+          bar.appendChild(cursor);
+          nameWithBar.appendChild(bar);
+          t._liveSeqCursor = cursor;
+          updateLiveSeqCursor(t);
         }
 
         // Replace the wrap with a CSS-grid layout so the columns line up:
@@ -11409,7 +11613,7 @@
         // The shared column 1 ensures the "S" of Sections and the "V" of
         // Volume start at the same x.
         wrap.innerHTML = '';
-        if (nameEl)        { nameEl.classList.add('live-cell-name');         wrap.appendChild(nameEl); }
+        if (nameWithBar)   { nameWithBar.classList.add('live-cell-name');    wrap.appendChild(nameWithBar); }
         if (sectionsBlock) { sectionsBlock.classList.add('live-cell-sections'); wrap.appendChild(sectionsBlock); }
         if (toolsWrap)     { toolsWrap.classList.add('live-cell-tools');     wrap.appendChild(toolsWrap); }
         if (volRow)        { volRow.classList.add('live-cell-volume');       wrap.appendChild(volRow); }
@@ -11813,7 +12017,7 @@
 
   // ---------- save / load ----------
   const SAVE_KEYS = {
-    common: ['name','kind','steps','pattern','volume','pan','mute','solo','armed','group','swing','mono','noteLen','expanded',
+    common: ['name','kind','steps','pattern','volume','pan','mute','solo','armed','group','groups','swing','mono','noteLen','expanded',
              'eqLow','eqMid','eqHigh',
              'delaySend','reverbSend','chorusSend','flangerSend','bitcrushSend','spaceEchoSend','duckAmt',
              'trkLfoRate','trkLfoShape','trkLfoVolDepth','trkLfoPanDepth','trkLfoCutDepth','trkLpfCutoff',
@@ -11979,22 +12183,29 @@
   // Vertical sliders with appearance:slider-vertical need an explicit
   // pixel height — percentages and flex grow are silently ignored. So
   // after each Effects render (and on resize / mode change) we measure
-  // each card and set the slider's height to fill whatever space is
-  // left under the dial section. Guarantees the user's "≥60% of the
-  // card" target on any viewport.
+  // every card to find the smallest "leftover" space below the dial
+  // section, then set EVERY slider to that height. Result: all sliders
+  // identical pixel height, every card filled top-to-bottom, dial-heavy
+  // cards stay un-clipped.
   function resizeEffectsFaders() {
     if (!document.body.classList.contains('mode-effects')) return;
     const cards = document.querySelectorAll('body.mode-effects .module');
+    // Reset all sliders so the measurement of sibling heights reflects
+    // the dials section alone, not an already-stretched fader.
+    cards.forEach(card => {
+      const fader = card.querySelector('.vfader');
+      if (fader) fader.style.height = '0px';
+    });
+    let minSpace = Infinity;
+    let referenceCardH = 0;
     cards.forEach(card => {
       const fader = card.querySelector('.vfader');
       if (!fader) return;
       const vfaderRow = fader.closest('.row.vfader-row');
       if (!vfaderRow) return;
-      // Reset so the measurement of siblings reflects content without
-      // an already-stretched slider.
-      fader.style.height = '0px';
       const cs = getComputedStyle(card);
       const cardH = card.clientHeight;
+      if (cardH > referenceCardH) referenceCardH = cardH;
       const padTop = parseFloat(cs.paddingTop) || 0;
       const padBot = parseFloat(cs.paddingBottom) || 0;
       const rowGap = parseFloat(cs.rowGap || cs.gap) || 0;
@@ -12012,9 +12223,16 @@
       const valueH = rowValue ? rowValue.offsetHeight : 0;
       const wrapGap = 4;
       const available = contentH - usedH - rowPadTop - labelH - valueH - rowGapV - wrapGap - 4;
-      const min60 = Math.round(cardH * 0.60);
-      const target = Math.max(min60, available, 140);
-      fader.style.height = target + 'px';
+      if (available < minSpace) minSpace = available;
+    });
+    if (!isFinite(minSpace)) return;
+    // Don't let it drop below ~60 % of the tallest card, so even
+    // dial-heavy modules still have a sizeable fader.
+    const min60 = Math.round(referenceCardH * 0.60);
+    const target = Math.max(140, Math.min(Math.max(minSpace, min60), referenceCardH - 60));
+    cards.forEach(card => {
+      const fader = card.querySelector('.vfader');
+      if (fader) fader.style.height = target + 'px';
     });
   }
   window.addEventListener('resize', () => requestAnimationFrame(resizeEffectsFaders));
