@@ -168,6 +168,12 @@
   /* Vertical fader — centered column (label · slider · value). The
      slider's pixel height is set by resizeEffectsFaders() at render
      time so it always fills the room below the knobs (≥60% of card). */
+  /* vfader-row gets the 1fr cell of the module grid, so it has a
+     definite height. Inside, label is at the top, vfader-wrap fills
+     the middle (1fr) and value sits at the bottom. The slider lives
+     inside vfader-wrap and is sized with inline px height by
+     resizeEffectsFaders() so every card's slider extends from below
+     its dials all the way down to the bottom — no empty space. */
   body.mode-effects .module .row.vfader-row {
     display: grid;
     grid-template-rows: auto 1fr auto;
@@ -187,15 +193,18 @@
     display: flex;
     flex-direction: column;
     align-items: center;
+    justify-content: stretch;
     min-height: 0;
-    width: 100%;
+    width: 24px;
     height: 100%;
+    /* This is the "track" the slider lives in — sized by the grid 1fr.
+       Acts as the measurement anchor for the JS sizing pass. */
   }
   body.mode-effects .module .vfader {
     width: 24px;
-    /* Default fallback — JS overrides via inline style for an exact fit. */
+    /* Default fallback — JS overrides via inline style to fill wrap. */
     height: 200px;
-    min-height: 120px;
+    min-height: 60px;
     -webkit-appearance: slider-vertical;
     appearance: slider-vertical;
     writing-mode: bt-lr;
@@ -1247,12 +1256,16 @@
   .morph-buttons .small { flex: 1; }
   body.mode-live .live-morph-row {
     display: flex;
-    flex-direction: column;
-    gap: 2px;
-    margin-top: 4px;
-    width: 90px;
+    flex-direction: row;
+    align-items: center;
+    gap: 4px;
+    margin-top: 0;
+    width: 130px;
     flex-shrink: 0;
   }
+  body.mode-live .live-morph-row .morph-slider { flex: 1; height: 12px; }
+  body.mode-live .live-morph-row .morph-ticks { display: none; }
+  body.mode-live .live-morph-row .morph-buttons { display: none; }
   body.mode-live .live-morph-row .morph-ticks { margin: 0 2px; }
   body.mode-live .add-row,
   body.mode-live .mixer,
@@ -1487,6 +1500,24 @@
     border-color: var(--accent);
   }
   .live-group-btn.empty { opacity: 0.35; cursor: not-allowed; }
+  /* Per-deck group-arm bar — inside the deck EQ panel, sits below the
+     3 EQ bands. */
+  .live-deck-groups {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 6px;
+    padding-top: 6px;
+    border-top: 1px solid var(--line);
+  }
+  .live-deck-groups .lbl {
+    font-size: 9px;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-right: 2px;
+  }
+  .live-deck-groups .live-group-btn { width: 20px; height: 20px; font-size: 9px; }
   .live-master-vol {
     display: flex;
     align-items: center;
@@ -1718,27 +1749,31 @@
     gap: 4px;
     min-height: 80px;
   }
-  /* Two-row channel strip on a shared grid: column 1 is "name / tools",
-     column 2 is "sections / volume" (so the S of Sections and the V of
-     Volume line up at the same x), column 3 holds Morphs. Tightened
-     row-gap + padding so every track row is closer in height — useful
-     when the deck holds many channels. */
+  /* Single-row channel strip — collapses the old two-row grid into one
+     line so each track is as short as possible. Order across the row:
+     name + playhead, pattern banks + groups, tools toggles, volume,
+     morphs. */
   body.mode-live .track {
     display: grid !important;
-    grid-template-columns: minmax(120px, max-content) minmax(0, 1fr) auto;
-    grid-template-areas:
-      "name  sections ."
-      "tools volume   morphs";
-    column-gap: 16px;
-    row-gap: 4px;
+    grid-template-columns: minmax(150px, max-content) auto auto minmax(120px, 1fr) auto;
+    grid-template-areas: "name sections tools volume morphs";
+    column-gap: 14px;
+    row-gap: 0;
     align-items: center;
     border: 1px solid var(--line);
     border-radius: 3px;
-    padding: 6px 10px;
+    padding: 4px 10px;
     overflow: hidden;
     width: 100%;
   }
-  body.mode-live .track + .track { margin-top: 4px; }
+  body.mode-live .track + .track { margin-top: 3px; }
+  /* Drop the per-cell labels (Tools / Volume / Morphs) in the new
+     single-line layout — every cell is now self-evidently labelled by
+     its content (toggle icons, fader, morph slider). */
+  body.mode-live .live-cell-tools .live-feature-label,
+  body.mode-live .live-cell-volume .live-feature-label,
+  body.mode-live .live-cell-morphs .live-feature-label,
+  body.mode-live .live-sections-inline > .live-feature-label:first-child { display: none; }
   body.mode-live .live-cell-name     { grid-area: name; align-self: center; }
   body.mode-live .live-cell-sections { grid-area: sections; }
   body.mode-live .live-cell-tools    { grid-area: tools; }
@@ -1863,8 +1898,9 @@
   /* Per-channel volume slider — stacks label above the slider + readout. */
   body.mode-live .live-vol-row {
     display: flex;
-    flex-direction: column;
-    gap: 4px;
+    flex-direction: row;
+    align-items: center;
+    gap: 6px;
     flex: 1;
     min-width: 80px;
   }
@@ -1872,6 +1908,8 @@
     display: flex;
     align-items: center;
     gap: 8px;
+    flex: 1;
+    min-width: 0;
   }
   body.mode-live .live-vol-row input[type="range"] {
     flex: 1;
@@ -12231,60 +12269,32 @@
   // Vertical sliders with appearance:slider-vertical need an explicit
   // pixel height — percentages and flex grow are silently ignored. So
   // after each Effects render (and whenever the side panel resizes) we
-  // measure each card to find the smallest "leftover" space below the
-  // dial section, then set EVERY slider to that height. Result: all
-  // sliders identical pixel height, every card filled top-to-bottom.
+  // size each slider to the height of its own .vfader-wrap (the 1fr
+  // cell of the vfader-row grid). Result: every slider extends from
+  // just below its dial section all the way to the card bottom — no
+  // empty space. Cards with more dials get shorter sliders; every
+  // slider's BOTTOM edge lines up with every other card's bottom.
   function resizeEffectsFaders() {
     if (!document.body.classList.contains('mode-effects')) return;
     const cards = document.querySelectorAll('.side .module');
     if (cards.length === 0) return;
-    // Reset all sliders to 0 so siblings can be measured cleanly. Force
-    // a sync reflow before reading offsetHeight to make sure the layout
-    // engine has caught up.
+    // Reset every slider to 0 so the wrap's grid 1fr cell measures its
+    // intrinsic empty-row height (otherwise an already-stretched slider
+    // would prop up the wrap and we'd never let it shrink). Force a
+    // sync reflow before reading.
     cards.forEach(card => {
       const fader = card.querySelector('.vfader');
       if (fader) fader.style.height = '0px';
     });
     void document.body.offsetHeight;
-
-    let minSpace = Infinity;
-    let referenceCardH = 0;
     cards.forEach(card => {
       const fader = card.querySelector('.vfader');
       if (!fader) return;
-      const vfaderRow = fader.closest('.row.vfader-row');
-      if (!vfaderRow) return;
-      const cardH = card.clientHeight;
-      if (cardH < 80) return;          // card not laid out yet
-      if (cardH > referenceCardH) referenceCardH = cardH;
-      const cs = getComputedStyle(card);
-      const padTop = parseFloat(cs.paddingTop) || 0;
-      const padBot = parseFloat(cs.paddingBottom) || 0;
-      const rowGap = parseFloat(cs.rowGap || cs.gap) || 0;
-      const contentH = cardH - padTop - padBot;
-      let usedH = 0;
-      let countOther = 0;
-      for (const child of card.children) {
-        if (child === vfaderRow) continue;
-        usedH += child.offsetHeight;
-        countOther++;
-      }
-      usedH += rowGap * countOther;
-      const rowCs = getComputedStyle(vfaderRow);
-      const rowPadTop = parseFloat(rowCs.paddingTop) || 0;
-      const rowGapV   = parseFloat(rowCs.rowGap || rowCs.gap) || 0;
-      const rowLabel = vfaderRow.querySelector('label');
-      const rowValue = vfaderRow.querySelector('.v');
-      const labelH = rowLabel ? rowLabel.offsetHeight : 12;
-      const valueH = rowValue ? rowValue.offsetHeight : 12;
-      const available = contentH - usedH - rowPadTop - labelH - valueH - rowGapV - 8;
-      if (available < minSpace) minSpace = available;
-    });
-    if (!isFinite(minSpace) || referenceCardH < 80) return;
-    const target = Math.max(140, Math.min(minSpace, referenceCardH - 60));
-    cards.forEach(card => {
-      const fader = card.querySelector('.vfader');
-      if (fader) fader.style.height = target + 'px';
+      const wrap = fader.closest('.vfader-wrap');
+      if (!wrap) return;
+      const wrapH = wrap.clientHeight;
+      if (wrapH < 40) return;  // wrap not laid out yet — skip this pass
+      fader.style.height = wrapH + 'px';
     });
   }
   // Watch the side panel for any size change (initial layout, mode
@@ -12753,6 +12763,43 @@
       bandsRow.appendChild(row);
     });
     host.appendChild(bandsRow);
+
+    // Global group-arm widget — sits inside each deck's EQ panel so the
+    // user can kill / revive a whole group (e.g. "drums") right next to
+    // where they're touching the EQ.
+    host.appendChild(buildLiveGroupBar('deck-' + deck));
+  }
+  // Inline group-arm bar — used inside every deck-EQ block and on the
+  // master bar. Reads/writes the shared groupArmed[] state.
+  function buildLiveGroupBar(idTag) {
+    const wrap = el('div', 'live-deck-groups');
+    wrap.appendChild(el('span', 'lbl', 'Groups'));
+    for (let i = 0; i < 4; i++) {
+      const btn = el('button', 'live-group-btn', String(i + 1));
+      btn.dataset.group = String(i);
+      btn.title = 'Arm / disarm every track in group ' + (i + 1);
+      const refreshBtn = () => {
+        const anyMember = tracks.some(t => t.groups && t.groups[i]);
+        btn.classList.toggle('on', groupArmed[i] && anyMember);
+        btn.classList.toggle('empty', !anyMember);
+      };
+      refreshBtn();
+      btn.addEventListener('click', (e) => {
+        e.preventDefault();
+        if (!tracks.some(t => t.groups && t.groups[i])) return;
+        groupArmed[i] = !groupArmed[i];
+        applyGroupArm(i);
+        refreshAllGroupBtns();
+        document.querySelectorAll('.live-group-btn').forEach(b => {
+          const idx = parseInt(b.dataset.group, 10);
+          const anyMember = tracks.some(t => t.groups && t.groups[idx]);
+          b.classList.toggle('on', groupArmed[idx] && anyMember);
+          b.classList.toggle('empty', !anyMember);
+        });
+      });
+      wrap.appendChild(btn);
+    }
+    return wrap;
   }
   buildDeckEq('A'); buildDeckEq('B');
 
