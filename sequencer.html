@@ -81,14 +81,16 @@
   }
   /* Side effects panel only shows on the Effects tab */
   .side { display: none; }
+  /* Three columns:
+     - left  : FX-rack presets (sticky)
+     - mid   : every effect / processor module, two dials per row
+     - right : master strip, full-height. */
   body.mode-effects .side {
     display: grid;
-    grid-template-columns: 240px 1fr;
-    gap: 28px;
-    align-items: start;
+    grid-template-columns: 220px minmax(0, 1fr) 220px;
+    gap: 24px;
+    align-items: stretch;
   }
-  /* FX-rack presets column on the left, sticky so it stays in view while
-     the user scrolls the modules on the right. */
   body.mode-effects #fx-racks {
     grid-column: 1;
     grid-row: 1 / -1;
@@ -96,20 +98,85 @@
     top: 16px;
     align-self: start;
   }
-  /* Each section is its own auto-fit grid so module cards still flow into
-     multiple columns, but live under a labelled header. Pinned to column 2. */
+  body.mode-effects #master {
+    grid-column: 3;
+    grid-row: 1 / -1;
+    position: sticky;
+    top: 16px;
+    /* align-self: stretch is the default in this grid (align-items: stretch
+       on the parent), so the master cell takes the full row-track height
+       and the sticky positioning keeps it visible while the middle column
+       scrolls. */
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    padding: 14px 16px;
+    background: var(--bg);
+    /* Internal layout: title, then vol fader takes the rest, then EQ +
+       warm at the bottom. Cap to viewport so very tall pages don't push
+       the bottom off-screen. */
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    max-height: calc(100vh - 32px);
+    overflow-y: auto;
+  }
+  body.mode-effects #master h2 { margin-top: 0; }
+  body.mode-effects #master .row.vfader-row {
+    flex: 1 1 0;
+    min-height: 180px;
+  }
+  body.mode-effects #master .vfader-wrap {
+    height: 100%;
+    align-items: stretch;
+  }
+  body.mode-effects #master .vfader {
+    flex: 1 1 0;
+    height: auto;
+    min-height: 160px;
+  }
+  /* Each section is its own auto-fit grid; pinned to the middle column. */
   body.mode-effects .fx-section {
     grid-column: 2;
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
     gap: 18px;
   }
+  /* Inside each effect module, lay the rows out in two columns so a
+     compact pair (eg. Time + Fbk) sits on one line. Selector / sync rows
+     get the full width via the `.wide` modifier below. */
+  body.mode-effects .fx-section .module {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    column-gap: 14px;
+    row-gap: 2px;
+    align-content: start;
+  }
+  body.mode-effects .fx-section .module h2,
+  body.mode-effects .fx-section .module > .row.wide {
+    grid-column: 1 / -1;
+  }
+  body.mode-effects .fx-section .module.collapsed { grid-template-columns: 1fr; }
+  /* In the 2-up modules each cell is ~half the module width, so the
+     standard 56px label is too wide. Shrink the label + value columns
+     and trim the gap so a (label, dial, value) row fits comfortably. */
+  body.mode-effects .fx-section .module > .row.rotary-row {
+    grid-template-columns: 40px auto minmax(0, 1fr);
+    column-gap: 6px;
+  }
+  body.mode-effects .fx-section .module > .row.eq-row.rotary-row {
+    grid-template-columns: 40px auto minmax(0, 1fr) 18px;
+  }
+  body.mode-effects .fx-section .module > .row label {
+    font-size: 9px;
+  }
   @media (max-width: 900px) {
-    /* On narrow viewports collapse to a single column. */
+    /* On narrow viewports collapse to a single column. Master returns to
+       the normal flow at the bottom of the column. */
     body.mode-effects .side {
       grid-template-columns: 1fr;
     }
     body.mode-effects #fx-racks,
+    body.mode-effects #master,
     body.mode-effects .fx-section {
       grid-column: 1;
       position: static;
@@ -157,10 +224,11 @@
     display: inline-flex; align-items: center; justify-content: center;
   }
   button.play.playing { background: transparent; color: var(--text); outline: 1px solid var(--accent); }
-  /* Transport record — icon-only red dot, same compact box as Play. */
+  /* Transport record — icon-only dot, same compact box as Play. Uses the
+     monochrome accent so it blends with the rest of the transport. */
   button.rec {
     background: transparent;
-    color: #e94747;
+    color: var(--text);
     border: 1px solid var(--cell-border);
     width: 34px; height: 28px;
     padding: 0;
@@ -168,8 +236,8 @@
     cursor: pointer;
     display: inline-flex; align-items: center; justify-content: center;
   }
-  button.rec:hover { border-color: #e94747; }
-  button.rec.on { background: #e94747; color: #fff; border-color: #e94747; }
+  button.rec:hover { border-color: var(--text); }
+  button.rec.on { background: var(--text); color: var(--bg); border-color: var(--text); }
   .transport button.small,
   .live-controls button.small,
   .module button.small,
@@ -326,7 +394,25 @@
     border-right: 1px solid var(--line);
   }
   .panel-sequencer   { min-width: 0; }
-  .panel-details     { min-width: 0; padding-left: 24px; border-left: 1px solid var(--line); }
+  .panel-details     {
+    min-width: 0;
+    padding-left: 24px;
+    border-left: 1px solid var(--line);
+    /* Clip horizontal overflow so a wide select / waveform / knob row
+       can't push a horizontal scroll on the column. */
+    overflow-x: hidden;
+  }
+  /* Make sure every form control inside the details panel can shrink
+     below its intrinsic content width — otherwise long preset names or
+     8-knob ADSR rows force the column to grow. */
+  .panel-details .knob { min-width: 0; flex-shrink: 1; }
+  .panel-details .knob select,
+  .panel-details .knob input[type="number"] { max-width: 100%; min-width: 0; }
+  .panel-details .group,
+  .panel-details .group-row,
+  .panel-details .knobs-section,
+  .panel-details .knobs-row { min-width: 0; max-width: 100%; }
+  .panel-details select { max-width: 100%; }
   /* Track-name headers share the exact same style across the instruments
      list, the sequencer column header, and each details section header. */
   .panel-track-name,
@@ -2340,10 +2426,13 @@
 
     <aside class="side">
       <div class="module" id="fx-racks"></div>
+      <!-- Master is pulled out of the Mastering section so it can be a
+           direct grid child of `.side` in Effects mode and own the
+           full-height right-hand column. -->
+      <div class="module" id="master"></div>
 
       <section class="fx-section">
         <h3 class="fx-section-title">Mastering</h3>
-        <div class="module" id="master"></div>
         <div class="module" id="comp"></div>
         <div class="module" id="ducker"></div>
         <div class="module" id="tape"></div>
@@ -2391,8 +2480,62 @@
       await projectDir.getDirectoryHandle('samples', { create: true });
       await projectDir.getDirectoryHandle('exports', { create: true });
       updateFolderIndicator();
+      // After the folder is set, try to auto-load a project JSON sitting
+      // at the root: 0 → flag, 1 → load, >1 → ask the user to pick one.
+      await autoLoadProjectFromDir();
       return true;
     } catch (e) { return false; }
+  }
+  // Scans the project folder root for `.json` files. Loads it directly
+  // when there's exactly one; falls back to a picker prompt when there
+  // are multiple, and flags the folder name when there are none.
+  async function autoLoadProjectFromDir() {
+    if (!projectDir) return;
+    const jsons = [];
+    try {
+      for await (const [name, handle] of projectDir.entries()) {
+        if (handle.kind === 'file' && /\.json$/i.test(name)) jsons.push(name);
+      }
+    } catch (e) {
+      console.warn('Could not enumerate folder for JSON files', e);
+      flagFolderProjectStatus('— no JSON');
+      return;
+    }
+    if (jsons.length === 0) {
+      flagFolderProjectStatus('— no project JSON');
+      return;
+    }
+    let chosen = jsons[0];
+    if (jsons.length > 1) {
+      const list = jsons.map((n, i) => (i + 1) + ') ' + n).join('\n');
+      const pick = window.prompt(
+        'Multiple project files found:\n\n' + list +
+        '\n\nType the number to load (Cancel to skip):',
+        '1'
+      );
+      if (!pick) { flagFolderProjectStatus('— pick a project'); return; }
+      const idx = parseInt(pick.trim(), 10) - 1;
+      if (!(idx >= 0 && idx < jsons.length)) { flagFolderProjectStatus('— pick a project'); return; }
+      chosen = jsons[idx];
+    }
+    try {
+      const fh = await projectDir.getFileHandle(chosen);
+      const file = await fh.getFile();
+      const text = await file.text();
+      loadProject(JSON.parse(text));
+      currentProjectName = chosen;
+      updateProjectNameDisplay();
+    } catch (e) {
+      console.warn('Failed to auto-load project JSON', e);
+      alert('Failed to load ' + chosen + ': ' + (e.message || e));
+    }
+  }
+  // Append a short status hint to the folder name pill so the user sees
+  // why nothing got auto-loaded.
+  function flagFolderProjectStatus(hint) {
+    const el = document.getElementById('folder-name');
+    if (!el || !projectDir) return;
+    el.textContent = projectDir.name + ' ' + hint;
   }
   function updateFolderIndicator() {
     const el = document.getElementById('folder-name');
@@ -11701,6 +11844,18 @@
     return words.join(' ');
   }
   async function saveProject(forceRename) {
+    // First time saving with no project folder set: prompt the user to
+    // pick (or create) one so the project + samples + recordings live
+    // together. They can decline and we'll fall through to a download.
+    if (!projectDir && window.showDirectoryPicker) {
+      const want = window.confirm(
+        'Save into a project folder?\n\n' +
+        'Pick or create a folder so the project file, samples and ' +
+        'recordings stay together. Cancel to download the JSON instead.'
+      );
+      if (want) await pickProjectDir();
+    }
+
     let filename;
     if (currentProjectName && !forceRename) {
       filename = currentProjectName;  // overwrite silently
