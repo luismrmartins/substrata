@@ -84,13 +84,24 @@
   /* Effects layout: every block (fx-racks · effect modules · master) is a
      full-height card sitting side-by-side in a single horizontal flex row.
      If the row is wider than the viewport, scroll horizontally — no
-     module ever wraps to a second row. */
+     module ever wraps to a second row.
+
+     Side height accounts for:
+       - body padding-top (18px) + transport row (~60px) above
+       - body padding-bottom on this mode (240 px when the decks mixer is
+         open, 40 px when it's collapsed). The variable is flipped by
+         the .mixer-collapsed body class.
+     so the panel never overlaps the bottom-fixed decks mixer or makes
+     the page scroll vertically. */
+  body.mode-effects { --side-bottom: 240px; }
+  body.mode-effects.mixer-collapsed { --side-bottom: 40px; }
   body.mode-effects .side {
     display: flex;
     flex-direction: row;
     gap: 12px;
     align-items: stretch;
-    height: calc(100vh - 32px);
+    height: calc(100vh - 90px - var(--side-bottom));
+    min-height: 280px;
     overflow-x: auto;
     overflow-y: hidden;
   }
@@ -168,9 +179,10 @@
   body.mode-effects .module .vfader {
     width: 24px;
     /* 60% of the side panel height (≈ 60% of every card) — guarantees
-       the slider is the visual focus at the bottom of each block. */
-    height: calc((100vh - 32px) * 0.6);
-    min-height: 200px;
+       the slider is the visual focus at the bottom of each block. The
+       calc mirrors the .side height calc above. */
+    height: calc((100vh - 90px - var(--side-bottom)) * 0.6);
+    min-height: 140px;
     -webkit-appearance: slider-vertical;
     appearance: slider-vertical;
     writing-mode: bt-lr;
@@ -182,6 +194,61 @@
     font-variant-numeric: tabular-nums;
     font-size: 10px;
   }
+  /* FX rack list — replaces the dropdown. Scrollable vertical list with
+     subtle section headers (Factory / User) and an accent highlight on
+     the selected entry. Lives inside the fx-racks card. */
+  body.mode-effects #fx-racks {
+    overflow-y: hidden;
+  }
+  body.mode-effects .fx-rack-list {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    margin: 0 -4px;
+    padding: 0 4px;
+  }
+  body.mode-effects .fx-rack-section {
+    font-size: 9px;
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+    color: var(--muted);
+    padding: 8px 2px 2px;
+  }
+  body.mode-effects .fx-rack-section:first-child { padding-top: 0; }
+  body.mode-effects .fx-rack-item {
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 3px;
+    color: var(--text);
+    font: inherit;
+    font-size: 10px;
+    text-align: left;
+    padding: 5px 8px;
+    cursor: pointer;
+  }
+  body.mode-effects .fx-rack-item:hover { background: rgba(139, 92, 246, 0.08); }
+  body.mode-effects .fx-rack-item.on {
+    background: var(--accent);
+    color: #fff;
+    border-color: var(--accent);
+  }
+  body.mode-effects .fx-rack-empty {
+    font-size: 10px;
+    color: var(--muted);
+    padding: 12px 4px;
+    text-align: center;
+  }
+  body.mode-effects .fx-rack-actions {
+    display: flex;
+    gap: 6px;
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px solid var(--line);
+  }
+  body.mode-effects .fx-rack-actions button { flex: 1; }
   @media (max-width: 900px) {
     /* On narrow viewports drop the side-by-side card row and let the
        blocks stack vertically with a normal page scroll. */
@@ -9901,56 +9968,48 @@
     if (!m) return;
     m.appendChild(el('h2', null, 'FX Rack'));
 
-    // Selector
-    const selRow = el('div', 'row wide');
-    selRow.appendChild(el('label', null, 'Preset'));
-    const sel = el('select');
-    sel.id = 'fx-rack-select';
+    // Scrollable vertical list of every rack (factory + user). Click an
+    // entry to apply it; the selected row gets the accent highlight.
+    let selectedValue = '';
+    const listWrap = el('div', 'fx-rack-list');
 
     const populate = (selectedName) => {
-      sel.innerHTML = '';
-      const placeholder = el('option', null, '— pick a rack —');
-      placeholder.value = '';
-      sel.appendChild(placeholder);
-      const factoryGroup = el('optgroup');
-      factoryGroup.label = 'Factory';
-      Object.keys(FX_RACK_FACTORY).forEach(name => {
-        const opt = el('option', null, name);
-        opt.value = 'factory:' + name;
-        if (selectedName === 'factory:' + name) opt.selected = true;
-        factoryGroup.appendChild(opt);
-      });
-      sel.appendChild(factoryGroup);
-      const user = getUserFxRacks();
-      const userNames = Object.keys(user);
-      if (userNames.length) {
-        const userGroup = el('optgroup');
-        userGroup.label = 'User';
-        userNames.forEach(name => {
-          const opt = el('option', null, name);
-          opt.value = 'user:' + name;
-          if (selectedName === 'user:' + name) opt.selected = true;
-          userGroup.appendChild(opt);
+      if (selectedName !== undefined) selectedValue = selectedName;
+      listWrap.innerHTML = '';
+
+      const section = (label, names, kind) => {
+        if (!names.length) return;
+        const head = el('div', 'fx-rack-section', label);
+        listWrap.appendChild(head);
+        names.forEach(name => {
+          const value = kind + ':' + name;
+          const item = el('button', 'fx-rack-item', name);
+          if (value === selectedValue) item.classList.add('on');
+          item.addEventListener('click', () => {
+            const rack = kind === 'factory' ? FX_RACK_FACTORY[name] : getUserFxRacks()[name];
+            if (rack) {
+              applyFxRack(rack);
+              selectedValue = value;
+              listWrap.querySelectorAll('.fx-rack-item').forEach(b => b.classList.remove('on'));
+              item.classList.add('on');
+            }
+          });
+          listWrap.appendChild(item);
         });
-        sel.appendChild(userGroup);
+      };
+
+      section('Factory', Object.keys(FX_RACK_FACTORY), 'factory');
+      const user = getUserFxRacks();
+      section('User', Object.keys(user), 'user');
+      if (Object.keys(FX_RACK_FACTORY).length === 0 && Object.keys(user).length === 0) {
+        listWrap.appendChild(el('div', 'fx-rack-empty', 'No presets yet'));
       }
     };
     populate();
+    m.appendChild(listWrap);
 
-    sel.addEventListener('change', () => {
-      const v = sel.value;
-      if (!v) return;
-      const [kind, name] = v.split(':');
-      const rack = kind === 'factory' ? FX_RACK_FACTORY[name] : getUserFxRacks()[name];
-      if (rack) applyFxRack(rack);
-    });
-    selRow.appendChild(sel);
-    m.appendChild(selRow);
-
-    // Save / Delete buttons
-    const btnRow = el('div', 'row wide');
-    btnRow.appendChild(el('label', null, ' '));
-    const btns = el('div', 'sync-ctrls');
+    // Save / Delete buttons under the list.
+    const btnRow = el('div', 'fx-rack-actions');
 
     const saveBtn = el('button', 'small', 'Save as…');
     saveBtn.addEventListener('click', () => {
@@ -9971,22 +10030,21 @@
 
     const deleteBtn = el('button', 'small', 'Delete');
     deleteBtn.addEventListener('click', () => {
-      const v = sel.value;
-      if (!v.startsWith('user:')) {
+      if (!selectedValue.startsWith('user:')) {
         alert('Only user racks can be deleted.');
         return;
       }
-      const name = v.slice(5);
+      const name = selectedValue.slice(5);
       if (!confirm('Delete user rack "' + name + '"?')) return;
       const user = getUserFxRacks();
       delete user[name];
       setUserFxRacks(user);
+      selectedValue = '';
       populate();
     });
 
-    btns.appendChild(saveBtn);
-    btns.appendChild(deleteBtn);
-    btnRow.appendChild(btns);
+    btnRow.appendChild(saveBtn);
+    btnRow.appendChild(deleteBtn);
     m.appendChild(btnRow);
   }
 
