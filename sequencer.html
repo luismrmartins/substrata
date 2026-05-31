@@ -116,15 +116,15 @@
 
   /* Every block — fx-racks, every effect module, master — shares the
      same card shell. Fixed width (70 % of the previous 220 px → 154 px),
-     stretched to the full side height. Grid template lets row 3
-     (vfader-row) take all remaining space so the slider has somewhere
-     to grow into. */
+     stretched to the full side height. Flex column: dials sit at the
+     top in natural order, vfader-row gets pushed to the bottom via
+     margin-top: auto. */
   body.mode-effects .module {
     flex: 0 0 154px;
     align-self: stretch;
-    display: grid;
-    grid-template-rows: auto auto 1fr;
-    row-gap: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
     border: 1px solid var(--line);
     border-radius: 4px;
     padding: 12px 10px 14px;
@@ -133,13 +133,6 @@
     height: 100%;
     box-sizing: border-box;
     overflow: hidden;
-  }
-  /* fx-racks doesn't have an fx-top or vfader-row, so collapse its grid
-     into a single flow column. */
-  body.mode-effects #fx-racks {
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
   }
   body.mode-effects .module h2 { margin: 0 0 4px; padding: 0; border: none; font-size: 11px; }
   /* Top knobs area — single column for breathing room now that each
@@ -150,9 +143,11 @@
     flex-direction: column;
     gap: 4px;
   }
-  /* Vertical fader fills row 3 of the module grid (1fr), with a thin
-     separator above dividing the dials area from the fader area. */
+  /* Vertical fader pinned to the bottom of every card via margin-top:
+     auto, with a thin separator above dividing the dials from the
+     fader area. */
   body.mode-effects .module > .row.vfader-row {
+    margin-top: auto;
     border-top: 1px solid var(--line);
   }
   /* Each row inside the .fx-top knobs area — narrow card means we go
@@ -168,20 +163,16 @@
   /* Vertical fader — centered column (label · slider · value). The
      slider's pixel height is set by resizeEffectsFaders() at render
      time so it always fills the room below the knobs (≥60% of card). */
-  /* vfader-row gets the 1fr cell of the module grid, so it has a
-     definite height. Inside, label is at the top, vfader-wrap fills
-     the middle (1fr) and value sits at the bottom. The slider lives
-     inside vfader-wrap and is sized with inline px height by
-     resizeEffectsFaders() so every card's slider extends from below
-     its dials all the way down to the bottom — no empty space. */
+  /* vfader-row is a flex column pinned to the card bottom. Inside:
+     label, vfader-wrap, then the slider value sits at the bottom of
+     the wrap. The slider height itself is set by JS to 55 % of the
+     card height — guarantees consistent fader sizing across cards. */
   body.mode-effects .module .row.vfader-row {
-    display: grid;
-    grid-template-rows: auto 1fr auto;
-    justify-items: center;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
     gap: 4px;
-    padding-top: 10px;
-    min-height: 0;
-    overflow: hidden;
+    padding-top: 8px;
   }
   body.mode-effects .module .row.vfader-row > label {
     font-size: 9px;
@@ -193,12 +184,8 @@
     display: flex;
     flex-direction: column;
     align-items: center;
-    justify-content: stretch;
-    min-height: 0;
+    gap: 4px;
     width: 24px;
-    height: 100%;
-    /* This is the "track" the slider lives in — sized by the grid 1fr.
-       Acts as the measurement anchor for the JS sizing pass. */
   }
   body.mode-effects .module .vfader {
     width: 24px;
@@ -12266,35 +12253,22 @@
     applyCollapsibles();
     requestAnimationFrame(resizeEffectsFaders);
   }
-  // Vertical sliders with appearance:slider-vertical need an explicit
-  // pixel height — percentages and flex grow are silently ignored. So
-  // after each Effects render (and whenever the side panel resizes) we
-  // size each slider to the height of its own .vfader-wrap (the 1fr
-  // cell of the vfader-row grid). Result: every slider extends from
-  // just below its dial section all the way to the card bottom — no
-  // empty space. Cards with more dials get shorter sliders; every
-  // slider's BOTTOM edge lines up with every other card's bottom.
+  // Effects vertical sliders need an explicit pixel height (vertical
+  // range inputs don't honour percent/flex). Set every fader to 55 %
+  // of its card's height — uniform sizing across cards, and the slider
+  // is already pinned to the card bottom via margin-top: auto on
+  // .row.vfader-row.
   function resizeEffectsFaders() {
     if (!document.body.classList.contains('mode-effects')) return;
     const cards = document.querySelectorAll('.side .module');
     if (cards.length === 0) return;
-    // Reset every slider to 0 so the wrap's grid 1fr cell measures its
-    // intrinsic empty-row height (otherwise an already-stretched slider
-    // would prop up the wrap and we'd never let it shrink). Force a
-    // sync reflow before reading.
-    cards.forEach(card => {
-      const fader = card.querySelector('.vfader');
-      if (fader) fader.style.height = '0px';
-    });
-    void document.body.offsetHeight;
     cards.forEach(card => {
       const fader = card.querySelector('.vfader');
       if (!fader) return;
-      const wrap = fader.closest('.vfader-wrap');
-      if (!wrap) return;
-      const wrapH = wrap.clientHeight;
-      if (wrapH < 40) return;  // wrap not laid out yet — skip this pass
-      fader.style.height = wrapH + 'px';
+      const cardH = card.clientHeight;
+      if (cardH < 80) return;       // not laid out yet
+      const target = Math.max(120, Math.round(cardH * 0.55));
+      fader.style.height = target + 'px';
     });
   }
   // Watch the side panel for any size change (initial layout, mode
