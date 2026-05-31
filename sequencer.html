@@ -103,71 +103,105 @@
     grid-row: 1 / -1;
     position: sticky;
     top: 16px;
-    /* align-self: stretch is the default in this grid (align-items: stretch
-       on the parent), so the master cell takes the full row-track height
-       and the sticky positioning keeps it visible while the middle column
-       scrolls. */
-    border: 1px solid var(--line);
-    border-radius: 4px;
-    padding: 14px 16px;
-    background: var(--bg);
-    /* Internal layout: title, then vol fader takes the rest, then EQ +
-       warm at the bottom. Cap to viewport so very tall pages don't push
-       the bottom off-screen. */
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    max-height: calc(100vh - 32px);
-    overflow-y: auto;
-  }
-  body.mode-effects #master h2 { margin-top: 0; }
-  body.mode-effects #master .row.vfader-row {
-    flex: 1 1 0;
-    min-height: 180px;
-  }
-  body.mode-effects #master .vfader-wrap {
-    height: 100%;
-    align-items: stretch;
-  }
-  body.mode-effects #master .vfader {
-    flex: 1 1 0;
-    height: auto;
-    min-height: 160px;
+    align-self: start;
+    /* Cap to the viewport so the bottom of the master (with its vertical
+       fader) is always visible no matter how tall the page becomes. */
+    height: calc(100vh - 32px);
   }
   /* Each section is its own auto-fit grid; pinned to the middle column. */
   body.mode-effects .fx-section {
     grid-column: 2;
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
     gap: 18px;
+    align-items: stretch;
   }
-  /* Inside each effect module, lay the rows out in two columns so a
-     compact pair (eg. Time + Fbk) sits on one line. Selector / sync rows
-     get the full width via the `.wide` modifier below. */
-  body.mode-effects .fx-section .module {
+  /* Every effect card — and the master — shares the same shell so the
+     Effects view feels uniform: framed box, knobs at the top, vertical
+     fader pinned at the bottom via margin-top: auto. */
+  body.mode-effects .fx-section .module,
+  body.mode-effects #master {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    padding: 14px 14px 18px;
+    background: var(--bg);
+    min-height: 380px;
+    box-sizing: border-box;
+  }
+  body.mode-effects .module h2 { margin: 0 0 4px; padding: 0; border: none; font-size: 11px; }
+  /* Top knobs area — laid out 2-up so common pairs (Time + Fbk, Rate +
+     Dep, Att + Rel, ...) sit on one row. Selector / sync rows still get
+     full width via .row.wide. */
+  body.mode-effects .module .fx-top {
     display: grid;
     grid-template-columns: 1fr 1fr;
-    column-gap: 14px;
+    column-gap: 12px;
     row-gap: 2px;
     align-content: start;
   }
-  body.mode-effects .fx-section .module h2,
-  body.mode-effects .fx-section .module > .row.wide {
-    grid-column: 1 / -1;
-  }
-  body.mode-effects .fx-section .module.collapsed { grid-template-columns: 1fr; }
-  /* In the 2-up modules each cell is ~half the module width, so the
-     standard 56px label is too wide. Shrink the label + value columns
-     and trim the gap so a (label, dial, value) row fits comfortably. */
-  body.mode-effects .fx-section .module > .row.rotary-row {
+  body.mode-effects .module .fx-top > .row.wide { grid-column: 1 / -1; }
+  /* Vertical fader pinned to the bottom of every card. */
+  body.mode-effects .module > .row.vfader-row { margin-top: auto; }
+  /* In the 2-up top area each cell is ~half the module width, so shrink
+     the row's label/value columns to fit a (label, dial, value) row. */
+  body.mode-effects .module .fx-top > .row.rotary-row {
     grid-template-columns: 40px auto minmax(0, 1fr);
     column-gap: 6px;
   }
-  body.mode-effects .fx-section .module > .row.eq-row.rotary-row {
+  body.mode-effects .module .fx-top > .row.eq-row.rotary-row {
     grid-template-columns: 40px auto minmax(0, 1fr) 18px;
   }
-  body.mode-effects .fx-section .module > .row label {
+  body.mode-effects .module .fx-top > .row label { font-size: 9px; }
+  /* Master column is narrower than the auto-fit fx-section cells, so
+     stack its rows one-per-line for breathing room. */
+  body.mode-effects #master .fx-top { grid-template-columns: 1fr; }
+  body.mode-effects #master .fx-top > .row.rotary-row {
+    grid-template-columns: 56px auto 1fr;
+    column-gap: 10px;
+  }
+  body.mode-effects #master .fx-top > .row.eq-row.rotary-row {
+    grid-template-columns: 56px auto 1fr 20px;
+  }
+  body.mode-effects #master .fx-top > .row label { font-size: 10px; }
+  /* Vertical fader — centered column (label · slider · value) so the
+     fader reads as a single stack at the bottom of every card. Same
+     pixel height across every module so the baselines line up. */
+  body.mode-effects .module .row.vfader-row {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    margin-top: auto;
+    padding-top: 6px;
+  }
+  body.mode-effects .module .row.vfader-row > label {
     font-size: 9px;
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+    color: var(--muted);
+  }
+  body.mode-effects .module .vfader-wrap {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+  }
+  body.mode-effects .module .vfader {
+    width: 24px;
+    height: 200px;
+    -webkit-appearance: slider-vertical;
+    appearance: slider-vertical;
+    writing-mode: bt-lr;
+    accent-color: var(--accent);
+    margin: 0;
+  }
+  body.mode-effects .module .vfader-row .v {
+    color: var(--text);
+    font-variant-numeric: tabular-nums;
+    font-size: 10px;
   }
   @media (max-width: 900px) {
     /* On narrow viewports collapse to a single column. Master returns to
@@ -5374,14 +5408,16 @@
     parent.appendChild(row);
     return row;
   }
-  // Vertical fader variant — only used for the master volume so the user
-  // keeps a vertical fader feel for the loudest control on the page.
-  function sideRowVerticalVol(parent, label, val, onChange, fmt) {
+  // Vertical fader for an effect module's primary parameter — Wet for
+  // sends, Threshold for the compressor, Cut for the filters, Vol for
+  // the master. All faders share the same pixel height so the cards
+  // align across the Effects view.
+  function sideRowVerticalFader(parent, label, min, max, step, val, onChange, fmt) {
     const row = el('div', 'row vfader-row');
     row.appendChild(el('label', null, label));
     const wrap = el('div', 'vfader-wrap');
     const r = el('input', 'vfader');
-    r.type = 'range'; r.min = 0; r.max = 1.2; r.step = 0.01; r.value = val;
+    r.type = 'range'; r.min = min; r.max = max; r.step = step; r.value = val;
     const v = el('span', 'v', fmt(val));
     r.addEventListener('input', () => {
       const x = parseFloat(r.value);
@@ -5393,6 +5429,11 @@
     row.appendChild(wrap);
     parent.appendChild(row);
     return row;
+  }
+  // Master volume keeps its own helper just so existing callers (the
+  // master strip) don't need to know about the more generic signature.
+  function sideRowVerticalVol(parent, label, val, onChange, fmt) {
+    return sideRowVerticalFader(parent, label, 0, 1.2, 0.01, val, onChange, fmt);
   }
   // Same as sideRow but with an EQ-kill button that toggles the band between
   // its current value and -40 dB.
@@ -9971,28 +10012,31 @@
   function buildMaster() {
     const m = document.getElementById('master');
     m.appendChild(el('h2', null, 'Master'));
-    sideRowVerticalVol(m, 'Vol', master.vol, v => {
-      master.vol = v; if (masterOut) masterOut.gain.setTargetAtTime(v, audioCtx.currentTime, 0.01);
-    }, v => v.toFixed(2));
-    sideRowEq(m, 'Low',  master.low,  v => {
+    const top = el('div', 'fx-top');
+    sideRowEq(top, 'Low',  master.low,  v => {
       master.low = v; if (eqLow) eqLow.gain.setTargetAtTime(v, audioCtx.currentTime, 0.01);
     });
-    sideRowEq(m, 'Mid',  master.mid,  v => {
+    sideRowEq(top, 'Mid',  master.mid,  v => {
       master.mid = v; if (eqMid) eqMid.gain.setTargetAtTime(v, audioCtx.currentTime, 0.01);
     });
-    sideRowEq(m, 'High', master.high, v => {
+    sideRowEq(top, 'High', master.high, v => {
       master.high = v; if (eqHigh) eqHigh.gain.setTargetAtTime(v, audioCtx.currentTime, 0.01);
     });
-    sideRow(m, 'Warm', 0, 1, 0.01, master.warmth, v => {
+    sideRow(top, 'Warm', 0, 1, 0.01, master.warmth, v => {
       master.warmth = v;
       if (warmShaper) warmShaper.curve = makeWarmthCurve(v);
       if (warmLow)  warmLow.gain.setTargetAtTime( 1.5 * v, audioCtx.currentTime, 0.02);
       if (warmHigh) warmHigh.gain.setTargetAtTime(-2.5 * v, audioCtx.currentTime, 0.02);
     }, v => v.toFixed(2));
+    m.appendChild(top);
+    sideRowVerticalVol(m, 'Vol', master.vol, v => {
+      master.vol = v; if (masterOut) masterOut.gain.setTargetAtTime(v, audioCtx.currentTime, 0.01);
+    }, v => v.toFixed(2));
   }
   function buildDelay() {
     const m = document.getElementById('delay');
     m.appendChild(el('h2', null, 'Delay'));
+    const top = el('div', 'fx-top');
 
     // Sync row: toggle + division selector
     const syncRow = el('div', 'row wide');
@@ -10011,7 +10055,7 @@
     ctrls.appendChild(syncBtn);
     ctrls.appendChild(divSel);
     syncRow.appendChild(ctrls);
-    m.appendChild(syncRow);
+    top.appendChild(syncRow);
 
     // Time row (manually built so we can refresh display when sync mode changes)
     const timeRow = el('div', 'row rotary-row');
@@ -10031,7 +10075,7 @@
     }, v => v.toFixed(2));
     timeRow.appendChild(timeDial);
     timeRow.appendChild(timeVal);
-    m.appendChild(timeRow);
+    top.appendChild(timeRow);
 
     function refreshTimeDisplay() {
       const t = delayCfg.sync ? computeDelaySync() : delayCfg.time;
@@ -10056,11 +10100,12 @@
       }
     });
 
-    sideRow(m, 'Fbk',  0, 0.95, 0.01, delayCfg.fb, v => {
+    sideRow(top, 'Fbk',  0, 0.95, 0.01, delayCfg.fb, v => {
       delayCfg.fb = v;
       if (delayFb) delayFb.gain.setTargetAtTime(v, audioCtx.currentTime, 0.02);
     }, v => v.toFixed(2));
-    sideRow(m, 'Wet',  0, 1, 0.01, delayCfg.wet, v => {
+    m.appendChild(top);
+    sideRowVerticalFader(m, 'Wet', 0, 1, 0.01, delayCfg.wet, v => {
       delayCfg.wet = v;
       if (delayWet) delayWet.gain.setTargetAtTime(v, audioCtx.currentTime, 0.02);
     }, v => v.toFixed(2));
@@ -10069,6 +10114,7 @@
     const m = document.getElementById('space-echo');
     if (!m) return;
     m.appendChild(el('h2', null, 'Space Echo'));
+    const top = el('div', 'fx-top');
 
     // Head mode selector
     const modeRow = el('div', 'row wide');
@@ -10089,7 +10135,7 @@
       applySpaceEchoMode();
     });
     modeRow.appendChild(modeSel);
-    m.appendChild(modeRow);
+    top.appendChild(modeRow);
 
     // Sync + division
     const syncRow = el('div', 'row wide');
@@ -10108,7 +10154,7 @@
     ctrls.appendChild(syncBtn);
     ctrls.appendChild(divSel);
     syncRow.appendChild(ctrls);
-    m.appendChild(syncRow);
+    top.appendChild(syncRow);
 
     // Base time (H1)
     const timeRow = el('div', 'row rotary-row');
@@ -10124,7 +10170,7 @@
     }, v => v.toFixed(3));
     timeRow.appendChild(timeDial);
     timeRow.appendChild(timeVal);
-    m.appendChild(timeRow);
+    top.appendChild(timeRow);
 
     function refreshSpaceTimeUI() {
       const t = spaceEchoCfg.sync ? computeSpaceBase() : spaceEchoCfg.baseTime;
@@ -10146,27 +10192,28 @@
       if (spaceEchoCfg.sync) { applySpaceEchoTimes(); refreshSpaceTimeUI(); }
     });
 
-    sideRow(m, 'Int',  0, 0.95, 0.01, spaceEchoCfg.intensity, v => {
+    sideRow(top, 'Int',  0, 0.95, 0.01, spaceEchoCfg.intensity, v => {
       spaceEchoCfg.intensity = v;
       if (spaceEchoFb) spaceEchoFb.gain.setTargetAtTime(v, audioCtx.currentTime, 0.02);
     }, v => v.toFixed(2));
-    sideRow(m, 'Wow',  0, 1, 0.01, spaceEchoCfg.wow, v => {
+    sideRow(top, 'Wow',  0, 1, 0.01, spaceEchoCfg.wow, v => {
       spaceEchoCfg.wow = v;
       if (spaceEchoWowG) spaceEchoWowG.gain.setTargetAtTime(v * 0.008, audioCtx.currentTime, 0.02);
     }, v => v.toFixed(2));
-    sideRow(m, 'Flut', 0, 1, 0.01, spaceEchoCfg.flutter, v => {
+    sideRow(top, 'Flut', 0, 1, 0.01, spaceEchoCfg.flutter, v => {
       spaceEchoCfg.flutter = v;
       if (spaceEchoFlutterG) spaceEchoFlutterG.gain.setTargetAtTime(v * 0.0015, audioCtx.currentTime, 0.02);
     }, v => v.toFixed(2));
-    sideRow(m, 'Sat',  0, 1, 0.01, spaceEchoCfg.sat, v => {
+    sideRow(top, 'Sat',  0, 1, 0.01, spaceEchoCfg.sat, v => {
       spaceEchoCfg.sat = v;
       if (spaceEchoSat) spaceEchoSat.curve = makeSpaceSatCurve(v);
     }, v => v.toFixed(2));
-    sideRow(m, 'HiCut', 800, 12000, 50, spaceEchoCfg.hicut, v => {
+    sideRow(top, 'HiCut', 800, 12000, 50, spaceEchoCfg.hicut, v => {
       spaceEchoCfg.hicut = v;
       if (spaceEchoTone) spaceEchoTone.frequency.setTargetAtTime(v, audioCtx.currentTime, 0.02);
     }, v => Math.round(v));
-    sideRow(m, 'Wet',  0, 1, 0.01, spaceEchoCfg.wet, v => {
+    m.appendChild(top);
+    sideRowVerticalFader(m, 'Wet', 0, 1, 0.01, spaceEchoCfg.wet, v => {
       spaceEchoCfg.wet = v;
       if (spaceEchoWet) spaceEchoWet.gain.setTargetAtTime(v, audioCtx.currentTime, 0.02);
     }, v => v.toFixed(2));
@@ -10174,11 +10221,13 @@
   function buildReverb() {
     const m = document.getElementById('reverb');
     m.appendChild(el('h2', null, 'Reverb'));
-    sideRow(m, 'Dec', 0.2, 8, 0.1, reverbCfg.decay, v => {
+    const top = el('div', 'fx-top');
+    sideRow(top, 'Dec', 0.2, 8, 0.1, reverbCfg.decay, v => {
       reverbCfg.decay = v;
       if (reverbNode) reverbNode.buffer = makeReverbIR(audioCtx, v);
     }, v => v.toFixed(1));
-    sideRow(m, 'Wet', 0, 1, 0.01, reverbCfg.wet, v => {
+    m.appendChild(top);
+    sideRowVerticalFader(m, 'Wet', 0, 1, 0.01, reverbCfg.wet, v => {
       reverbCfg.wet = v;
       if (reverbWet) reverbWet.gain.setTargetAtTime(v, audioCtx.currentTime, 0.02);
     }, v => v.toFixed(2));
@@ -10186,17 +10235,19 @@
   function buildChorus() {
     const m = document.getElementById('chorus');
     m.appendChild(el('h2', null, 'Chorus'));
-    sideRow(m, 'Rate', 0.05, 6, 0.01, chorusCfg.rate, v => {
+    const top = el('div', 'fx-top');
+    sideRow(top, 'Rate', 0.05, 6, 0.01, chorusCfg.rate, v => {
       chorusCfg.rate = v;
       if (chorusLfoL) chorusLfoL.frequency.setTargetAtTime(v, audioCtx.currentTime, 0.02);
       if (chorusLfoR) chorusLfoR.frequency.setTargetAtTime(v, audioCtx.currentTime, 0.02);
     }, v => v.toFixed(2));
-    sideRow(m, 'Dep', 0, 1, 0.01, chorusCfg.depth, v => {
+    sideRow(top, 'Dep', 0, 1, 0.01, chorusCfg.depth, v => {
       chorusCfg.depth = v;
       if (chorusModL) chorusModL.gain.setTargetAtTime(v * 0.008, audioCtx.currentTime, 0.02);
       if (chorusModR) chorusModR.gain.setTargetAtTime(v * 0.008, audioCtx.currentTime, 0.02);
     }, v => v.toFixed(2));
-    sideRow(m, 'Wet', 0, 1, 0.01, chorusCfg.wet, v => {
+    m.appendChild(top);
+    sideRowVerticalFader(m, 'Wet', 0, 1, 0.01, chorusCfg.wet, v => {
       chorusCfg.wet = v;
       if (chorusWet) chorusWet.gain.setTargetAtTime(v, audioCtx.currentTime, 0.02);
     }, v => v.toFixed(2));
@@ -10204,19 +10255,21 @@
   function buildFlanger() {
     const m = document.getElementById('flanger');
     m.appendChild(el('h2', null, 'Flanger'));
-    sideRow(m, 'Rate', 0.05, 6, 0.01, flangerCfg.rate, v => {
+    const top = el('div', 'fx-top');
+    sideRow(top, 'Rate', 0.05, 6, 0.01, flangerCfg.rate, v => {
       flangerCfg.rate = v;
       if (flangerLfo) flangerLfo.frequency.setTargetAtTime(v, audioCtx.currentTime, 0.02);
     }, v => v.toFixed(2));
-    sideRow(m, 'Dep', 0, 1, 0.01, flangerCfg.depth, v => {
+    sideRow(top, 'Dep', 0, 1, 0.01, flangerCfg.depth, v => {
       flangerCfg.depth = v;
       if (flangerMod) flangerMod.gain.setTargetAtTime(v * 0.004, audioCtx.currentTime, 0.02);
     }, v => v.toFixed(2));
-    sideRow(m, 'Fbk', 0, 0.9, 0.01, flangerCfg.fb, v => {
+    sideRow(top, 'Fbk', 0, 0.9, 0.01, flangerCfg.fb, v => {
       flangerCfg.fb = v;
       if (flangerFb) flangerFb.gain.setTargetAtTime(v, audioCtx.currentTime, 0.02);
     }, v => v.toFixed(2));
-    sideRow(m, 'Wet', 0, 1, 0.01, flangerCfg.wet, v => {
+    m.appendChild(top);
+    sideRowVerticalFader(m, 'Wet', 0, 1, 0.01, flangerCfg.wet, v => {
       flangerCfg.wet = v;
       if (flangerWet) flangerWet.gain.setTargetAtTime(v, audioCtx.currentTime, 0.02);
     }, v => v.toFixed(2));
@@ -10224,31 +10277,34 @@
   function buildComp() {
     const m = document.getElementById('comp');
     m.appendChild(el('h2', null, 'Compressor'));
-    sideRow(m, 'Thr', -60, 0, 1, compCfg.threshold, v => {
-      compCfg.threshold = v;
-      if (compressor) compressor.threshold.setTargetAtTime(v, audioCtx.currentTime, 0.02);
-    }, v => v.toFixed(0));
-    sideRow(m, 'Rat', 1, 20, 0.5, compCfg.ratio, v => {
+    const top = el('div', 'fx-top');
+    sideRow(top, 'Rat', 1, 20, 0.5, compCfg.ratio, v => {
       compCfg.ratio = v;
       if (compressor) compressor.ratio.setTargetAtTime(v, audioCtx.currentTime, 0.02);
     }, v => v.toFixed(1));
-    sideRow(m, 'Att', 0.0005, 0.3, 0.0005, compCfg.attack, v => {
+    sideRow(top, 'Att', 0.0005, 0.3, 0.0005, compCfg.attack, v => {
       compCfg.attack = v;
       if (compressor) compressor.attack.setTargetAtTime(v, audioCtx.currentTime, 0.02);
     }, v => (v * 1000).toFixed(1));
-    sideRow(m, 'Rel', 0.01, 1.5, 0.01, compCfg.release, v => {
+    sideRow(top, 'Rel', 0.01, 1.5, 0.01, compCfg.release, v => {
       compCfg.release = v;
       if (compressor) compressor.release.setTargetAtTime(v, audioCtx.currentTime, 0.02);
     }, v => (v * 1000).toFixed(0));
-    sideRow(m, 'Kne', 0, 40, 1, compCfg.knee, v => {
+    sideRow(top, 'Kne', 0, 40, 1, compCfg.knee, v => {
       compCfg.knee = v;
       if (compressor) compressor.knee.setTargetAtTime(v, audioCtx.currentTime, 0.02);
     }, v => v.toFixed(0));
+    m.appendChild(top);
+    sideRowVerticalFader(m, 'Thr', -60, 0, 1, compCfg.threshold, v => {
+      compCfg.threshold = v;
+      if (compressor) compressor.threshold.setTargetAtTime(v, audioCtx.currentTime, 0.02);
+    }, v => v.toFixed(0) + ' dB');
   }
 
   function buildDucker() {
     const m = document.getElementById('ducker');
     m.appendChild(el('h2', null, 'Ducker'));
+    const top = el('div', 'fx-top');
 
     const srcRow = el('div', 'row wide');
     srcRow.appendChild(el('label', null, 'Src'));
@@ -10264,37 +10320,42 @@
     });
     sel.addEventListener('change', () => { duckCfg.sourceIndex = parseInt(sel.value); });
     srcRow.appendChild(sel);
-    m.appendChild(srcRow);
+    top.appendChild(srcRow);
 
-    sideRow(m, 'Att', 0.001, 0.2, 0.001, duckCfg.attack, v => {
+    sideRow(top, 'Att', 0.001, 0.2, 0.001, duckCfg.attack, v => {
       duckCfg.attack = v;
     }, v => (v * 1000).toFixed(1));
-    sideRow(m, 'Rel', 0.02, 1.5, 0.01, duckCfg.release, v => {
+    m.appendChild(top);
+    // Release as the headline fader — gives the user a feel for the duck
+    // recovery envelope that's easy to ride live.
+    sideRowVerticalFader(m, 'Rel', 0.02, 1.5, 0.01, duckCfg.release, v => {
       duckCfg.release = v;
-    }, v => (v * 1000).toFixed(0));
+    }, v => (v * 1000).toFixed(0) + ' ms');
   }
 
   function buildLoFi() {
     const m = document.getElementById('lofi');
     m.innerHTML = '';
     m.appendChild(el('h2', null, 'Lo-Fi House'));
-    sideRow(m, 'Drive', 0, 1, 0.01, lofiCfg.drive, v => {
+    const top = el('div', 'fx-top');
+    sideRow(top, 'Drive', 0, 1, 0.01, lofiCfg.drive, v => {
       lofiCfg.drive = v;
       if (lofiSat) lofiSat.curve = makeLofiSatCurve(v);
     }, v => v.toFixed(2));
-    sideRow(m, 'HiCut', 500, 20000, 10, lofiCfg.hiCut, v => {
+    sideRow(top, 'HiCut', 500, 20000, 10, lofiCfg.hiCut, v => {
       lofiCfg.hiCut = v;
       if (lofiLP) lofiLP.frequency.setTargetAtTime(v, audioCtx.currentTime, 0.02);
     }, v => Math.round(v));
-    sideRow(m, 'Wobble', 0, 1, 0.01, lofiCfg.wobble, v => {
+    sideRow(top, 'Wobble', 0, 1, 0.01, lofiCfg.wobble, v => {
       lofiCfg.wobble = v;
       if (lofiWobbleDepth) lofiWobbleDepth.gain.setTargetAtTime(v * 0.005, audioCtx.currentTime, 0.02);
     }, v => v.toFixed(2));
-    sideRow(m, 'Dust', 0, 1, 0.01, lofiCfg.dust, v => {
+    sideRow(top, 'Dust', 0, 1, 0.01, lofiCfg.dust, v => {
       lofiCfg.dust = v;
       if (lofiDustGain) lofiDustGain.gain.setTargetAtTime(v * 0.35, audioCtx.currentTime, 0.02);
     }, v => v.toFixed(2));
-    sideRow(m, 'Wet', 0, 1, 0.01, lofiCfg.wet, v => {
+    m.appendChild(top);
+    sideRowVerticalFader(m, 'Wet', 0, 1, 0.01, lofiCfg.wet, v => {
       lofiCfg.wet = v;
       if (lofiDry) lofiDry.gain.setTargetAtTime(1 - v, audioCtx.currentTime, 0.02);
       if (lofiWet) lofiWet.gain.setTargetAtTime(v, audioCtx.currentTime, 0.02);
@@ -10305,59 +10366,65 @@
     const m = document.getElementById('lpfilter');
     m.innerHTML = '';
     m.appendChild(el('h2', null, 'Low-Pass'));
-    sideRow(m, 'Cut', 20, 22000, 10, lpfCfg.freq, v => {
-      lpfCfg.freq = v;
-      if (masterLP) masterLP.frequency.setTargetAtTime(v, audioCtx.currentTime, 0.02);
-    }, v => Math.round(v));
-    sideRow(m, 'Q', 0.1, 20, 0.1, lpfCfg.q, v => {
+    const top = el('div', 'fx-top');
+    sideRow(top, 'Q', 0.1, 20, 0.1, lpfCfg.q, v => {
       lpfCfg.q = v;
       if (masterLP) masterLP.Q.setTargetAtTime(v, audioCtx.currentTime, 0.02);
     }, v => v.toFixed(1));
+    m.appendChild(top);
+    sideRowVerticalFader(m, 'Cut', 20, 22000, 10, lpfCfg.freq, v => {
+      lpfCfg.freq = v;
+      if (masterLP) masterLP.frequency.setTargetAtTime(v, audioCtx.currentTime, 0.02);
+    }, v => Math.round(v) + ' Hz');
   }
   function buildHPFilter() {
     const m = document.getElementById('hpfilter');
     m.innerHTML = '';
     m.appendChild(el('h2', null, 'High-Pass'));
-    sideRow(m, 'Cut', 20, 22000, 10, hpfCfg.freq, v => {
-      hpfCfg.freq = v;
-      if (masterHP) masterHP.frequency.setTargetAtTime(v, audioCtx.currentTime, 0.02);
-    }, v => Math.round(v));
-    sideRow(m, 'Q', 0.1, 20, 0.1, hpfCfg.q, v => {
+    const top = el('div', 'fx-top');
+    sideRow(top, 'Q', 0.1, 20, 0.1, hpfCfg.q, v => {
       hpfCfg.q = v;
       if (masterHP) masterHP.Q.setTargetAtTime(v, audioCtx.currentTime, 0.02);
     }, v => v.toFixed(1));
+    m.appendChild(top);
+    sideRowVerticalFader(m, 'Cut', 20, 22000, 10, hpfCfg.freq, v => {
+      hpfCfg.freq = v;
+      if (masterHP) masterHP.frequency.setTargetAtTime(v, audioCtx.currentTime, 0.02);
+    }, v => Math.round(v) + ' Hz');
   }
 
   function buildTape() {
     const m = document.getElementById('tape');
     m.innerHTML = '';
     m.appendChild(el('h2', null, 'Tape'));
-    sideRow(m, 'Wow', 0, 1, 0.01, tapeCfg.wow, v => {
+    const top = el('div', 'fx-top');
+    sideRow(top, 'Wow', 0, 1, 0.01, tapeCfg.wow, v => {
       tapeCfg.wow = v;
       if (tapeWowDepth) tapeWowDepth.gain.setTargetAtTime(v * 0.004, audioCtx.currentTime, 0.02);
     }, v => v.toFixed(2));
-    sideRow(m, 'Flut', 0, 1, 0.01, tapeCfg.flutter, v => {
+    sideRow(top, 'Flut', 0, 1, 0.01, tapeCfg.flutter, v => {
       tapeCfg.flutter = v;
       if (tapeFlutterDepth) tapeFlutterDepth.gain.setTargetAtTime(v * 0.0008, audioCtx.currentTime, 0.02);
     }, v => v.toFixed(2));
-    sideRow(m, 'Crkl', 0, 1, 0.01, tapeCfg.crackle, v => {
+    sideRow(top, 'Crkl', 0, 1, 0.01, tapeCfg.crackle, v => {
       tapeCfg.crackle = v;
       if (tapeCrackleGain) tapeCrackleGain.gain.setTargetAtTime(v * 0.3, audioCtx.currentTime, 0.02);
     }, v => v.toFixed(2));
-    sideRow(m, 'Hiss', 0, 1, 0.01, tapeCfg.hiss, v => {
+    sideRow(top, 'Hiss', 0, 1, 0.01, tapeCfg.hiss, v => {
       tapeCfg.hiss = v;
       if (tapeHissGain) tapeHissGain.gain.setTargetAtTime(v * 0.04, audioCtx.currentTime, 0.02);
     }, v => v.toFixed(2));
-    sideRow(m, 'Sat', 0, 1, 0.01, tapeCfg.sat, v => {
+    sideRow(top, 'Sat', 0, 1, 0.01, tapeCfg.sat, v => {
       tapeCfg.sat = v;
       if (tapeSatNode) tapeSatNode.curve = makeTapeSatCurve(v);
     }, v => v.toFixed(2));
-    sideRow(m, 'Tone', 0, 1, 0.01, tapeCfg.tone, v => {
+    sideRow(top, 'Tone', 0, 1, 0.01, tapeCfg.tone, v => {
       tapeCfg.tone = v;
       if (tapeFilterHP) tapeFilterHP.frequency.setTargetAtTime(20 + v * 180, audioCtx.currentTime, 0.02);
       if (tapeFilterLP) tapeFilterLP.frequency.setTargetAtTime(18000 - v * 12000, audioCtx.currentTime, 0.02);
     }, v => v.toFixed(2));
-    sideRow(m, 'Wet', 0, 1, 0.01, tapeCfg.wet, v => {
+    m.appendChild(top);
+    sideRowVerticalFader(m, 'Wet', 0, 1, 0.01, tapeCfg.wet, v => {
       tapeCfg.wet = v;
       if (tapeDry) tapeDry.gain.setTargetAtTime(1 - v, audioCtx.currentTime, 0.02);
       if (tapeWet) tapeWet.gain.setTargetAtTime(v, audioCtx.currentTime, 0.02);
@@ -10367,13 +10434,15 @@
   function buildBitcrush() {
     const m = document.getElementById('bitcrush');
     m.appendChild(el('h2', null, 'Bitcrush'));
-    sideRow(m, 'Bits', 1, 16, 1, bitcrushCfg.bits, v => {
+    const top = el('div', 'fx-top');
+    sideRow(top, 'Bits', 1, 16, 1, bitcrushCfg.bits, v => {
       bitcrushCfg.bits = v;
     }, v => v.toFixed(0));
-    sideRow(m, 'Rate', 0.02, 1, 0.01, bitcrushCfg.normFreq, v => {
+    sideRow(top, 'Rate', 0.02, 1, 0.01, bitcrushCfg.normFreq, v => {
       bitcrushCfg.normFreq = v;
     }, v => v.toFixed(2));
-    sideRow(m, 'Wet', 0, 1, 0.01, bitcrushCfg.wet, v => {
+    m.appendChild(top);
+    sideRowVerticalFader(m, 'Wet', 0, 1, 0.01, bitcrushCfg.wet, v => {
       bitcrushCfg.wet = v;
       if (bitcrushWet) bitcrushWet.gain.setTargetAtTime(v, audioCtx.currentTime, 0.02);
     }, v => v.toFixed(2));
