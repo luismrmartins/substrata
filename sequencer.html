@@ -1682,6 +1682,23 @@
     accent-color: var(--accent);
   }
   .live-deck-vol-row .v { text-align: right; color: var(--text); font-variant-numeric: tabular-nums; }
+  /* Bipolar deck filter — one centre-detented knob per deck. Centre = off,
+     turn left to sweep a low-pass down, turn right to sweep a high-pass up. */
+  .live-deck-filter-row {
+    display: grid;
+    grid-template-columns: 24px 1fr 60px;
+    column-gap: 8px;
+    align-items: center;
+    padding-bottom: 6px;
+    border-bottom: 1px solid var(--line);
+    font-size: 9px;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+  .live-deck-filter-row .lbl { color: var(--accent); font-weight: 600; }
+  .live-deck-filter-row .rotary { width: 24px; height: 24px; justify-self: center; }
+  .live-deck-filter-row .v { text-align: right; color: var(--text); font-variant-numeric: tabular-nums; }
   /* All three EQ bands sit in one horizontal row — eliminates the dead
      space between the dial and the value/kill that the stacked layout had. */
   .live-deck-eq-bands {
@@ -5073,8 +5090,13 @@
   // → masterIn. Created in initAudio().
   let deckABusEqLow, deckABusEqMid, deckABusEqHigh, deckAVolNode;
   let deckBBusEqLow, deckBBusEqMid, deckBBusEqHigh, deckBVolNode;
+  // Per-deck bipolar sweep filter — an HPF + LPF pair in series on each deck
+  // bus. At rest (value 0) both are wide open (bypass); a single knob sweeps
+  // one or the other. Created in initAudio().
+  let deckAFilterHP, deckAFilterLP, deckBFilterHP, deckBFilterLP;
   const liveDeckEq  = { A: { low: 0, mid: 0, high: 0 }, B: { low: 0, mid: 0, high: 0 } };
   const liveDeckVol = { A: 1, B: 1 };
+  const liveDeckFilter = { A: 0, B: 0 };  // -1 = full low-pass, 0 = off, +1 = full high-pass
   function deckBusInputFor(deck) {
     if (deck === 'A' && deckABusEqLow) return deckABusEqLow;
     if (deck === 'B' && deckBBusEqLow) return deckBBusEqLow;
@@ -5301,8 +5323,18 @@
     // touching the A/B balance.
     deckAVolNode = audioCtx.createGain(); deckAVolNode.gain.value = liveDeckVol.A;
     deckBVolNode = audioCtx.createGain(); deckBVolNode.gain.value = liveDeckVol.B;
-    deckABusEqLow.connect(deckABusEqMid).connect(deckABusEqHigh).connect(deckAVolNode).connect(masterIn);
-    deckBBusEqLow.connect(deckBBusEqMid).connect(deckBBusEqHigh).connect(deckBVolNode).connect(masterIn);
+    // Per-deck bipolar sweep filter (HPF → LPF), sitting after the EQ and
+    // before the deck volume. Both start wide open so the deck is unaffected
+    // until the user touches the filter knob.
+    deckAFilterHP = audioCtx.createBiquadFilter(); deckAFilterHP.type='highpass'; deckAFilterHP.frequency.value = 20;    deckAFilterHP.Q.value = 0.7;
+    deckAFilterLP = audioCtx.createBiquadFilter(); deckAFilterLP.type='lowpass';  deckAFilterLP.frequency.value = 22000; deckAFilterLP.Q.value = 0.7;
+    deckBFilterHP = audioCtx.createBiquadFilter(); deckBFilterHP.type='highpass'; deckBFilterHP.frequency.value = 20;    deckBFilterHP.Q.value = 0.7;
+    deckBFilterLP = audioCtx.createBiquadFilter(); deckBFilterLP.type='lowpass';  deckBFilterLP.frequency.value = 22000; deckBFilterLP.Q.value = 0.7;
+    deckABusEqLow.connect(deckABusEqMid).connect(deckABusEqHigh).connect(deckAFilterHP).connect(deckAFilterLP).connect(deckAVolNode).connect(masterIn);
+    deckBBusEqLow.connect(deckBBusEqMid).connect(deckBBusEqHigh).connect(deckBFilterHP).connect(deckBFilterLP).connect(deckBVolNode).connect(masterIn);
+    // Restore any filter positions set before the audio graph existed.
+    applyDeckFilter('A', liveDeckFilter.A);
+    applyDeckFilter('B', liveDeckFilter.B);
     warmLow    = audioCtx.createBiquadFilter(); warmLow.type='lowshelf';  warmLow.frequency.value  = 180;  warmLow.gain.value  =  1.5 * master.warmth;
     warmHigh   = audioCtx.createBiquadFilter(); warmHigh.type='highshelf'; warmHigh.frequency.value = 4500; warmHigh.gain.value = -2.5 * master.warmth;
     warmShaper = audioCtx.createWaveShaper();   warmShaper.curve = makeWarmthCurve(master.warmth);
@@ -12729,6 +12761,40 @@
     if (node) node.gain.setTargetAtTime(value, audioCtx.currentTime, 0.02);
   }
 
+  // Bipolar deck filter. value ∈ [-1, 1]: 0 = both filters open (bypass),
+  // negative sweeps a low-pass down from 20 kHz to 300 Hz, positive sweeps a
+  // high-pass up from 20 Hz to 8 kHz. Frequencies move logarithmically so the
+  // sweep feels even across the knob's travel.
+  const DECK_FILTER_LP_MAX = 20000, DECK_FILTER_LP_MIN = 300;
+  const DECK_FILTER_HP_MIN = 20,    DECK_FILTER_HP_MAX = 8000;
+  function deckFilterFreqs(value) {
+    let hp = DECK_FILTER_HP_MIN, lp = 22000;
+    if (value < 0) {
+      const frac = Math.min(1, -value);
+      lp = DECK_FILTER_LP_MAX * Math.pow(DECK_FILTER_LP_MIN / DECK_FILTER_LP_MAX, frac);
+    } else if (value > 0) {
+      const frac = Math.min(1, value);
+      hp = DECK_FILTER_HP_MIN * Math.pow(DECK_FILTER_HP_MAX / DECK_FILTER_HP_MIN, frac);
+    }
+    return { hp, lp };
+  }
+  function applyDeckFilter(deck, value) {
+    liveDeckFilter[deck] = value;
+    if (!audioCtx) return;
+    const hpNode = deck === 'A' ? deckAFilterHP : deckBFilterHP;
+    const lpNode = deck === 'A' ? deckAFilterLP : deckBFilterLP;
+    if (!hpNode || !lpNode) return;
+    const { hp, lp } = deckFilterFreqs(value);
+    hpNode.frequency.setTargetAtTime(hp, audioCtx.currentTime, 0.02);
+    lpNode.frequency.setTargetAtTime(lp, audioCtx.currentTime, 0.02);
+  }
+  const fmtHz = f => f >= 1000 ? (f / 1000).toFixed(f >= 10000 ? 0 : 1) + 'k' : Math.round(f);
+  function fmtDeckFilter(value) {
+    if (Math.abs(value) < 0.02) return 'OFF';
+    const { hp, lp } = deckFilterFreqs(value);
+    return value < 0 ? 'LP ' + fmtHz(lp) : 'HP ' + fmtHz(hp);
+  }
+
   function buildDeckEq(deck) {
     const host = document.getElementById('live-deck-eq-' + deck);
     if (!host) return;
@@ -12753,6 +12819,20 @@
     volRow.appendChild(volSlider);
     volRow.appendChild(volVal);
     host.appendChild(volRow);
+
+    // Bipolar sweep filter — single centre-detented knob. Double-click the
+    // knob to snap back to centre (off).
+    const filtRow = el('div', 'live-deck-filter-row');
+    filtRow.appendChild(el('span', 'lbl', 'Filt'));
+    const filtVal = el('span', 'v', fmtDeckFilter(liveDeckFilter[deck]));
+    const filtDial = makeRotary(-1, 1, liveDeckFilter[deck], (v) => {
+      filtVal.textContent = fmtDeckFilter(v);
+      applyDeckFilter(deck, v);
+    }, fmtDeckFilter);
+    filtDial.title = 'Deck ' + deck + ' filter — left: low-pass, right: high-pass (double-click = off)';
+    filtRow.appendChild(filtDial);
+    filtRow.appendChild(filtVal);
+    host.appendChild(filtRow);
 
     const bandsRow = el('div', 'live-deck-eq-bands');
     [['LO','low'],['MD','mid'],['HI','high']].forEach(([label, band]) => {
