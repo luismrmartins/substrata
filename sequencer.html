@@ -679,13 +679,34 @@
     padding: 8px 10px;
     cursor: pointer;
     transition: border-color 80ms ease, background 80ms ease;
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
   }
   .instrument-item:hover { border-color: var(--muted); }
   .instrument-item.selected {
     border-color: var(--accent);
     background: rgba(139, 92, 246, 0.05);
   }
+  /* Drag handle for reordering instruments in the list. The row only
+     becomes draggable while the handle is held (set in JS), so the name
+     input and toggle buttons stay fully usable. */
+  .instrument-item .drag-handle {
+    flex: 0 0 auto;
+    cursor: grab;
+    color: var(--muted);
+    font-size: 13px;
+    line-height: 18px;
+    padding-top: 1px;
+    user-select: none;
+  }
+  .instrument-item .drag-handle:active { cursor: grabbing; }
+  .instrument-item.dragging { opacity: 0.45; }
+  .instrument-item.drop-before { box-shadow: inset 0 2px 0 0 var(--accent); }
+  .instrument-item.drop-after  { box-shadow: inset 0 -2px 0 0 var(--accent); }
   .instrument-item .track-meta {
+    flex: 1 1 auto;
+    min-width: 0;
     display: flex;
     flex-direction: column;
     align-items: stretch;
@@ -6242,12 +6263,25 @@
     for (let i = 0; i < 4; i++) {
       const btn = el('button', 'group-btn', String(i + 1));
       btn.dataset.group = String(i);
-      btn.title = 'Group ' + (i + 1) + ' — click: ' +
-        'join group / toggle whole-group arm; alt-click or right-click: toggle membership';
+      btn.title = 'Group ' + (i + 1) + ' — click to add or remove this track from the group';
       updateGroupBtn(btn, track, i);
       btn.addEventListener('click', (e) => {
         e.stopPropagation();
-        if (e.altKey || e.shiftKey) {
+        if (currentMode === 'recording') {
+          // Track mode: a plain click assigns / unassigns membership so the
+          // group selector is purely for grouping. (Whole-group arm/disarm
+          // lives on the Live and Mix bars.)
+          const wasMember = !!track.groups[i];
+          track.groups[i] = !wasMember;
+          // Leaving a group that's currently disarmed must not strand the
+          // track silently muted — restore it to armed.
+          if (wasMember && !groupArmed[i] && !track.armed) {
+            track.armed = true;
+            track._pendingArmed = undefined;
+            refreshAllToggleBtns();
+            refreshMicGates();
+          }
+        } else if (e.altKey || e.shiftKey) {
           track.groups[i] = !track.groups[i];
         } else if (!track.groups[i]) {
           track.groups[i] = true;
@@ -6289,6 +6323,20 @@
       }
       if (t._sBtn) t._sBtn.classList.toggle('on', t.solo);
     }
+  }
+  // Reorder the tracks array by drag-and-drop in the Track-mode instrument
+  // list. `after` = drop below the target row rather than above it.
+  function reorderTracks(draggedId, targetId, after) {
+    if (draggedId === targetId) return;
+    const from = tracks.findIndex(t => t.id === draggedId);
+    if (from < 0) return;
+    const [moved] = tracks.splice(from, 1);
+    let to = tracks.findIndex(t => t.id === targetId);
+    if (to < 0) { tracks.splice(Math.min(from, tracks.length), 0, moved); return; }
+    if (after) to += 1;
+    tracks.splice(to, 0, moved);
+    rebuildTracksUI();
+    rebuildDuckerSourceOptions();
   }
   function duplicateTrack(t) {
     const td = serializeTrack(t);
@@ -11554,10 +11602,19 @@
         const mic   = wrap.querySelector('.mic-control');
         const knobs = wrap.querySelector('.track-knobs');
 
-        // Move the meta (name + toggles) into an instrument-list item.
+        // Move the meta (name + toggles) into an instrument-list item, with
+        // a drag handle in front for reordering.
         const item = el('div', 'instrument-item');
         item.dataset.trackId = t.id;
         if (t.id === selectedTrackId) item.classList.add('selected');
+        const handle = el('span', 'drag-handle', '⠿');
+        handle.title = 'Drag to reorder';
+        // Only arm dragging while the handle is held, so the name input and
+        // toggle buttons in the row stay clickable / editable.
+        handle.addEventListener('mousedown', () => { item.draggable = true; });
+        const disarmDrag = () => { item.draggable = false; };
+        handle.addEventListener('mouseup', disarmDrag);
+        item.appendChild(handle);
         if (meta) item.appendChild(meta);
         instPanel.appendChild(item);
         item.addEventListener('click', (e) => {
@@ -11567,6 +11624,35 @@
             selectedTrackId = t.id;
             rebuildTracksUI();
           }
+        });
+        const clearDropMarks = () =>
+          item.classList.remove('drop-before', 'drop-after');
+        item.addEventListener('dragstart', (e) => {
+          e.dataTransfer.effectAllowed = 'move';
+          e.dataTransfer.setData('text/plain', String(t.id));
+          item.classList.add('dragging');
+        });
+        item.addEventListener('dragend', () => {
+          item.draggable = false;
+          item.classList.remove('dragging');
+          instPanel.querySelectorAll('.instrument-item')
+            .forEach(x => x.classList.remove('drop-before', 'drop-after'));
+        });
+        item.addEventListener('dragover', (e) => {
+          e.preventDefault();
+          e.dataTransfer.dropEffect = 'move';
+          const rect = item.getBoundingClientRect();
+          const after = (e.clientY - rect.top) > rect.height / 2;
+          item.classList.toggle('drop-after', after);
+          item.classList.toggle('drop-before', !after);
+        });
+        item.addEventListener('dragleave', clearDropMarks);
+        item.addEventListener('drop', (e) => {
+          e.preventDefault();
+          const draggedId = parseInt(e.dataTransfer.getData('text/plain'), 10);
+          const after = item.classList.contains('drop-after');
+          clearDropMarks();
+          if (!Number.isNaN(draggedId)) reorderTracks(draggedId, t.id, after);
         });
 
         // For the selected track only, move the sequencer + knobs into
