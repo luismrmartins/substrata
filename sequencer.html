@@ -1697,7 +1697,7 @@
     letter-spacing: 0.5px;
   }
   .live-deck-filter-row .lbl { color: var(--accent); font-weight: 600; }
-  .live-deck-filter-row .rotary { width: 24px; height: 24px; justify-self: center; }
+  .live-deck-filter-row input[type="range"] { width: 100%; height: 12px; accent-color: var(--accent); }
   .live-deck-filter-row .v { text-align: right; color: var(--text); font-variant-numeric: tabular-nums; }
   /* All three EQ bands sit in one horizontal row — eliminates the dead
      space between the dial and the value/kill that the stacked layout had. */
@@ -12820,17 +12820,23 @@
     volRow.appendChild(volVal);
     host.appendChild(volRow);
 
-    // Bipolar sweep filter — single centre-detented knob. Double-click the
-    // knob to snap back to centre (off).
+    // Bipolar sweep filter — centre-detented slider. Centre = off; left
+    // sweeps a low-pass down, right sweeps a high-pass up. Double-click the
+    // slider to snap back to centre.
     const filtRow = el('div', 'live-deck-filter-row');
     filtRow.appendChild(el('span', 'lbl', 'Filt'));
     const filtVal = el('span', 'v', fmtDeckFilter(liveDeckFilter[deck]));
-    const filtDial = makeRotary(-1, 1, liveDeckFilter[deck], (v) => {
+    const filtSlider = el('input'); filtSlider.type = 'range';
+    filtSlider.min = -1; filtSlider.max = 1; filtSlider.step = 0.01;
+    filtSlider.value = liveDeckFilter[deck];
+    filtSlider.title = 'Deck ' + deck + ' filter — left: low-pass, right: high-pass (double-click = off)';
+    const setFilt = (v) => {
       filtVal.textContent = fmtDeckFilter(v);
       applyDeckFilter(deck, v);
-    }, fmtDeckFilter);
-    filtDial.title = 'Deck ' + deck + ' filter — left: low-pass, right: high-pass (double-click = off)';
-    filtRow.appendChild(filtDial);
+    };
+    filtSlider.addEventListener('input', () => setFilt(parseFloat(filtSlider.value)));
+    filtSlider.addEventListener('dblclick', () => { filtSlider.value = 0; setFilt(0); });
+    filtRow.appendChild(filtSlider);
     filtRow.appendChild(filtVal);
     host.appendChild(filtRow);
 
