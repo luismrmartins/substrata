@@ -210,9 +210,13 @@
     /* Default fallback — JS overrides via inline style to fill wrap. */
     height: 200px;
     min-height: 60px;
+    /* Vertical range. slider-vertical is the legacy WebKit/Chrome<121 path;
+       Chrome 121+ removed it, so the modern standard writing-mode is what
+       actually makes these tall now. direction:rtl puts min at the bottom. */
     -webkit-appearance: slider-vertical;
     appearance: slider-vertical;
-    writing-mode: bt-lr;
+    writing-mode: vertical-lr;
+    direction: rtl;
     accent-color: var(--accent);
     margin: 0;
   }
@@ -2307,7 +2311,8 @@
   .side .row.vfader-row .vfader {
     -webkit-appearance: slider-vertical;
     appearance: slider-vertical;
-    writing-mode: bt-lr;
+    writing-mode: vertical-lr;
+    direction: rtl;
     width: 24px;
     height: 110px;
     accent-color: var(--accent);
