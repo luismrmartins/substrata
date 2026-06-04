@@ -2684,6 +2684,7 @@
             <label for="bpm">BPM</label>
             <input id="bpm" type="number" min="20" max="300" value="118" />
           </div>
+          <button id="tap" class="small" title="Tap tempo — tap in time to set the BPM">TAP</button>
         </div>
         <div class="tabs transport-center" id="mode-toggle">
           <button data-mode="recording" class="on">Track</button>
@@ -3081,6 +3082,149 @@
     g.gain.exponentialRampToValueAtTime(0.0001, t + 0.05);
     o.connect(g).connect(out); o.start(t); o.stop(t + 0.06);
   }
+
+  // Amplitude envelope wrapper for drum voices. The synthesised drum still has
+  // its own internal decay; this gain sits between the voice and the channel
+  // and lets the user soften the transient (Atk) or gate the tail short (Len).
+  // Defaults (atk ~0, len 2 s) are long enough to be transparent — every
+  // built-in drum finishes ringing well before the gate closes — so the knobs
+  // only ever subtract from the natural sound.
+  function drumEnvNode(ctx, at, tr, dest) {
+    const eg = ctx.createGain();
+    const a = Math.max(0.0005, tr.ampAttack != null ? tr.ampAttack : 0.002);
+    const len = Math.max(0.01, tr.ampDecay != null ? tr.ampDecay : 2.0);
+    eg.gain.setValueAtTime(0.0001, at);
+    eg.gain.linearRampToValueAtTime(1, at + a);
+    const gateEnd = at + Math.max(a, len);
+    eg.gain.setValueAtTime(1, gateEnd);
+    eg.gain.linearRampToValueAtTime(0.0001, gateEnd + 0.005);
+    eg.connect(dest);
+    return eg;
+  }
+
+  // ---------- per-track modulation LFOs ----------
+  // Three free-running LFOs per track, each routed to one "characteristic".
+  // Most targets are plain track parameters that the voices read at note
+  // onset, so modulation evolves the sound step-to-step; volume/pan drive a
+  // live channel AudioParam for continuous movement. Everything is computed
+  // control-rate in modTick(), independent of the per-voice synthesis code.
+  const LFO_TARGETS = [
+    { key: 'none',       label: 'none' },
+    { key: 'cutoff',     label: 'cutoff',  mode: 'oct',   amt: 2 },
+    { key: 'reso',       label: 'reso',    mode: 'add',   amt: 8,    min: 0.1,  max: 25 },
+    { key: 'pitch',      label: 'pitch',   mode: 'pitch', amt: 7 },
+    { key: 'fEnvAmt',    label: 'filtEnv', mode: 'add',   amt: 0.5,  min: 0,    max: 1 },
+    { key: 'pulseWidth', label: 'pulseW',  mode: 'add',   amt: 0.45, min: 0.05, max: 0.95 },
+    { key: 'tune',       label: 'tune',    mode: 'add',   amt: 12,   min: -24,  max: 24 },
+    { key: 'volume',     label: 'volume',  mode: 'node',  amt: 0.4,  min: 0,    max: 1.2, node: 'vol' },
+    { key: 'pan',        label: 'pan',     mode: 'node',  amt: 1,    min: -1,   max: 1,   node: 'pan' },
+  ];
+  const LFO_TARGET_MAP = {};
+  LFO_TARGETS.forEach(d => { LFO_TARGET_MAP[d.key] = d; });
+
+  // Which targets a track can offer: channel targets always, plus any synth
+  // parameter the track actually exposes ('pitch' needs a root note).
+  function lfoTargetsFor(track) {
+    return LFO_TARGETS.filter(d => {
+      if (d.key === 'none') return true;
+      if (d.mode === 'node') return true;
+      if (d.key === 'pitch') return typeof track.root === 'number';
+      return typeof track[d.key] === 'number';
+    }).map(d => d.key);
+  }
+
+  function lfoWave(shape, phase) {
+    switch (shape) {
+      case 'triangle': return phase < 0.5 ? phase * 4 - 1 : 3 - phase * 4;
+      case 'sawtooth': return phase * 2 - 1;
+      case 'square':   return phase < 0.5 ? -1 : 1;
+      default:         return Math.sin(phase * 2 * Math.PI);
+    }
+  }
+
+  function lfoReadRaw(track, def) {
+    if (def.mode === 'node') return def.node === 'pan' ? (track.pan || 0) : track.volume;
+    if (def.key === 'pitch') return track.root;
+    return track[def.key];
+  }
+  function lfoWriteRaw(track, def, val) {
+    if (def.mode === 'node') {
+      const ap = def.node === 'pan' ? (track.trkPanNode && track.trkPanNode.pan)
+                                    : (track.volNode && track.volNode.gain);
+      if (ap) {
+        if (audioCtx) ap.setTargetAtTime(val, audioCtx.currentTime, 0.008);
+        else ap.value = val;
+      }
+      return;
+    }
+    if (def.key === 'pitch') { track.root = val; return; }
+    track[def.key] = val;
+  }
+  function lfoCompute(def, base, off) {
+    // off ≈ -1..1 (summed wave * depth across LFOs sharing this target).
+    if (def.mode === 'oct')   return clamp(base * Math.pow(2, def.amt * off), 40, 18000);
+    if (def.mode === 'pitch') return base + def.amt * off;
+    return clamp(base + def.amt * off, def.min, def.max);
+  }
+
+  let _modLast = (typeof performance !== 'undefined') ? performance.now() : 0;
+  function updateTrackLFOs(track, dt) {
+    const lfos = track.lfos;
+    if (!lfos) return;
+    if (!track._lfoPhase)   track._lfoPhase = [0, 0, 0];
+    if (!track._lfoBase)    track._lfoBase = {};
+    if (!track._lfoApplied) track._lfoApplied = {};
+
+    const offsets = {};
+    const active = {};
+    for (let i = 0; i < lfos.length; i++) {
+      const L = lfos[i];
+      if (!L || L.target === 'none' || !L.depth) continue;
+      const def = LFO_TARGET_MAP[L.target];
+      if (!def || def.key === 'none') continue;
+      let ph = (track._lfoPhase[i] + dt * (L.rate || 0)) % 1;
+      if (ph < 0) ph += 1;
+      track._lfoPhase[i] = ph;
+      active[L.target] = true;
+      offsets[L.target] = (offsets[L.target] || 0) + lfoWave(L.shape, ph) * L.depth;
+    }
+
+    // Restore targets no longer modulated back to their stored base.
+    for (const key of Object.keys(track._lfoBase)) {
+      if (!active[key]) {
+        const def = LFO_TARGET_MAP[key];
+        if (def) lfoWriteRaw(track, def, track._lfoBase[key]);
+        delete track._lfoBase[key];
+        delete track._lfoApplied[key];
+      }
+    }
+
+    // Apply active targets. Re-base whenever the raw value changed since we
+    // last wrote it (i.e. the user moved the knob), so dials stay live.
+    for (const key in active) {
+      const def = LFO_TARGET_MAP[key];
+      const raw = lfoReadRaw(track, def);
+      const applied = track._lfoApplied[key];
+      let base;
+      if (applied !== undefined && def.mode !== 'node' && Math.abs(raw - applied) < 1e-9) {
+        base = track._lfoBase[key];
+      } else {
+        base = raw;
+        track._lfoBase[key] = raw;
+      }
+      const val = lfoCompute(def, base, offsets[key]);
+      lfoWriteRaw(track, def, val);
+      track._lfoApplied[key] = val;
+    }
+  }
+  function modTick() {
+    const now = performance.now();
+    const dt = Math.min(0.1, (now - _modLast) / 1000);
+    _modLast = now;
+    for (const t of tracks) updateTrackLFOs(t, dt);
+    requestAnimationFrame(modTick);
+  }
+  requestAnimationFrame(modTick);
 
   // ---------- bass ----------
   // Cached soft-limit curve for the bass voice — keeps the three-oscillator
@@ -4929,6 +5073,15 @@
       eqLow: 0, eqMid: 0, eqHigh: 0,
       trkLfoRate: 0.5, trkLfoShape: 'sine',
       trkLfoVolDepth: 0, trkLfoPanDepth: 0, trkLfoCutDepth: 0,
+      // Three free-running modulation LFOs per track. Each routes to one
+      // instrument/channel characteristic (target) at its own rate + depth.
+      // Evaluated control-rate (see modTick) so they work across every
+      // instrument kind without touching the per-voice synthesis code.
+      lfos: [
+        { rate: 1.0, depth: 0, shape: 'sine', target: 'none' },
+        { rate: 1.0, depth: 0, shape: 'sine', target: 'none' },
+        { rate: 1.0, depth: 0, shape: 'sine', target: 'none' },
+      ],
       // Channel-wide lowpass on the track output — kept fully open by
       // default so it's inaudible until the user dials it down. The
       // Track LFO can modulate its cutoff via trkLfoCutDepth.
@@ -4950,7 +5103,9 @@
     let specific = {};
     switch (kind) {
       case 'drum':
-        specific = { voiceType: 'kick', voice: DRUM_VOICES.kick, tune: 0 };
+        // ampAttack / ampDecay drive the drum amp envelope (see drumEnvNode).
+        // Defaults are intentionally transparent until the user dials them in.
+        specific = { voiceType: 'kick', voice: DRUM_VOICES.kick, tune: 0, ampAttack: 0.002, ampDecay: 2.0 };
         break;
       case 'bass':
         specific = {
@@ -5095,6 +5250,19 @@
     if (!Array.isArray(t.groups) || t.groups.length !== 4) {
       t.groups = [false, false, false, false];
     }
+    // Normalise the 3 modulation LFOs — old projects predate them, and a
+    // saved project may carry fewer/garbled entries.
+    if (!Array.isArray(t.lfos)) t.lfos = [];
+    for (let i = 0; i < 3; i++) {
+      const L = t.lfos[i] || {};
+      t.lfos[i] = {
+        rate:   typeof L.rate === 'number' ? L.rate : 1.0,
+        depth:  typeof L.depth === 'number' ? L.depth : 0,
+        shape:  L.shape || 'sine',
+        target: L.target || 'none',
+      };
+    }
+    t.lfos.length = 3;
     // restore voice references that may be lost via serialization
     if (t.kind === 'drum')   t.voice = DRUM_VOICES[t.voiceType] || DRUM_VOICES.kick;
     if (t.kind === 'bass')   t.voice = vBass;
@@ -9515,6 +9683,10 @@
         knob('Tune', -24, 24, 1, track.tune, v => track.tune = v,
           v => (v >= 0 ? '+' : '') + v),
       ));
+      k.appendChild(group('Env',
+        knob('Atk', 0.0005, 0.2, 0.0005, track.ampAttack, v => track.ampAttack = v, v => v.toFixed(3)),
+        knob('Len', 0.02, 2.0, 0.01, track.ampDecay, v => track.ampDecay = v, v => v.toFixed(2)),
+      ));
     }
 
     if (track.kind === 'bass') {
@@ -9877,6 +10049,19 @@
         if (track.trkLfoCutG) track.trkLfoCutG.gain.setTargetAtTime(v * 4000, audioCtx.currentTime, 0.02);
       }, v => v.toFixed(2)),
     ));
+
+    // Three routable modulation LFOs — each picks a target characteristic
+    // (Tgt), a rate (Hz) and an intensity (Int = depth). See modTick().
+    const lfoTargets = lfoTargetsFor(track);
+    for (let i = 0; i < 3; i++) {
+      const L = track.lfos[i];
+      k.appendChild(group('LFO ' + (i + 1),
+        selectField('Tgt', lfoTargets, L.target, v => { L.target = v; }),
+        knob('Rate', 0.02, 20, 0.02, L.rate, v => L.rate = v, v => v.toFixed(2)),
+        knob('Int', 0, 1, 0.01, L.depth, v => L.depth = v, v => v.toFixed(2)),
+        selectField('Shp', ['sine','triangle','sawtooth','square'], L.shape, v => L.shape = v),
+      ));
+    }
   }
 
   function rebuildSteps(track) {
@@ -10969,7 +11154,8 @@
             prevFreq:  t._prevFreq,
             prevSlide: t._prevSlide,
           };
-          t.voice(audioCtx, t.nextNoteTime, tg, t, entry, env);
+          const vDest = (t.kind === 'drum') ? drumEnvNode(audioCtx, t.nextNoteTime, t, tg) : tg;
+          t.voice(audioCtx, t.nextNoteTime, vDest, t, entry, env);
           if (t.mono) t._lastTrigGain = tg;
           if (i === duckCfg.sourceIndex) triggerDuck(t.nextNoteTime);
         }
@@ -11020,6 +11206,28 @@
       applySpaceEchoTimes();
       if (spaceEchoCfg._refreshUI) spaceEchoCfg._refreshUI();
     }
+  });
+
+  // tap tempo — average the interval over the last few taps. Taps more than
+  // 2 s apart start a fresh measurement so an old, stale tap can't drag the
+  // average down.
+  const tapBtn = document.getElementById('tap');
+  let tapTimes = [];
+  tapBtn.addEventListener('click', () => {
+    const now = performance.now();
+    if (tapTimes.length && now - tapTimes[tapTimes.length - 1] > 2000) tapTimes = [];
+    tapTimes.push(now);
+    if (tapTimes.length > 6) tapTimes.shift();
+    if (tapTimes.length >= 2) {
+      let sum = 0;
+      for (let i = 1; i < tapTimes.length; i++) sum += tapTimes[i] - tapTimes[i - 1];
+      const avg = sum / (tapTimes.length - 1);
+      const bpm = clamp(Math.round(60000 / avg), 20, 300);
+      bpmInput.value = bpm;
+      bpmInput.dispatchEvent(new Event('input'));
+    }
+    tapBtn.classList.add('on');
+    setTimeout(() => tapBtn.classList.remove('on'), 90);
   });
 
   // theme toggle
@@ -11354,7 +11562,8 @@
     const at = audioCtx.currentTime + 0.02;
     const env = { stepDur, prevFreq: null, prevSlide: false };
     const step = { pitch: 0, slide: false, length: 1.0, velocity: 1.0 };
-    try { track.voice(audioCtx, at, track.input, track, step, env); }
+    const pDest = (track.kind === 'drum') ? drumEnvNode(audioCtx, at, track, track.input) : track.input;
+    try { track.voice(audioCtx, at, pDest, track, step, env); }
     catch (e) { console.warn('Preview failed:', e); }
   }
 
@@ -12167,7 +12376,8 @@
         const tp = offline.createStereoPanner(); tp.pan.value = pan;
         tg.connect(tp).connect(input);
         const env = { stepDur, prevFreq, prevSlide };
-        try { t.voice(offline, time, tg, t, entry, env); } catch (e) { /* skip */ }
+        const vDest = (t.kind === 'drum') ? drumEnvNode(offline, time, t, tg) : tg;
+        try { t.voice(offline, time, vDest, t, entry, env); } catch (e) { /* skip */ }
         if (t.kind === 'bass' || t.kind === 'lead' || t.kind === 'sh101' || t.kind === 'juno' || t.kind === 'cs80') {
           prevFreq = midiToFreq(t.root + (entry.pitch || 0));
           prevSlide = !!entry.slide;
@@ -12265,9 +12475,10 @@
              'eqLow','eqMid','eqHigh',
              'delaySend','reverbSend','chorusSend','flangerSend','bitcrushSend','spaceEchoSend','duckAmt',
              'trkLfoRate','trkLfoShape','trkLfoVolDepth','trkLfoPanDepth','trkLfoCutDepth','trkLpfCutoff',
+             'lfos',
              'morphStates','morphPos',
              'patternBanks','activeBank'],
-    drum:   ['voiceType','tune'],
+    drum:   ['voiceType','tune','ampAttack','ampDecay'],
     bass:   ['root','wave','subLevel','sinLevel','sawLevel','cutoff','reso','env','fDecay',
              'attack','decay','sustain','release',
              'lfoRate','lfoShape','lfoCut','lfoRes','lfoPitch','lfoAmp','lfoEnv'],
@@ -12321,6 +12532,17 @@
     const out = {};
     SAVE_KEYS.common.forEach(k => out[k] = t[k]);
     (SAVE_KEYS[t.kind] || []).forEach(k => out[k] = t[k]);
+    // A parameter being modulated by an LFO holds its modulated value on the
+    // track right now — persist the user's base value instead so reloading
+    // doesn't bake in a random point of the LFO sweep.
+    if (t._lfoBase) {
+      for (const key in t._lfoBase) {
+        const def = LFO_TARGET_MAP[key];
+        if (!def || def.mode === 'node') continue;
+        const prop = def.key === 'pitch' ? 'root' : def.key;
+        if (prop in out) out[prop] = t._lfoBase[key];
+      }
+    }
     return out;
   }
   function getProjectState() {
