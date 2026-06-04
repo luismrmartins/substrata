@@ -9333,7 +9333,7 @@
           track.volume = v;
           if (track.volNode) track.volNode.gain.setTargetAtTime(v, audioCtx.currentTime, 0.01);
         }, v => v.toFixed(2)),
-        knob('Swg', 0, 0.6, 0.01, track.swing || 0, v => track.swing = v, v => v.toFixed(2)),
+        knob('Swg', 0, 0.85, 0.01, track.swing || 0, v => track.swing = v, v => v.toFixed(2)),
         checkBox('Mono', track.mono, v => { track.mono = v; if (!v) track._lastTrigGain = null; }),
       ];
       if (NOTE_LEN_KINDS.has(track.kind)) {
@@ -10581,6 +10581,11 @@
     buildChorus(); buildFlanger(); buildBitcrush(); buildTape(); buildLoFi();
     buildLPFilter(); buildHPFilter();
     applyCollapsibles();
+    // Rebuilding replaces every .vfader with a fresh element that falls back
+    // to the CSS default height. The ResizeObserver won't fire (the .side
+    // panel didn't change size), so re-run the sizing explicitly — otherwise
+    // applying a preset leaves the faders shrunk to the default height.
+    requestAnimationFrame(resizeEffectsFaders);
   }
 
   function buildFxRacks() {
@@ -10628,8 +10633,24 @@
     populate();
     m.appendChild(listWrap);
 
-    // Save / Delete buttons under the list.
+    // Save / Save as… / Delete buttons under the list.
     const btnRow = el('div', 'fx-rack-actions');
+
+    // Save = overwrite the currently selected user rack in place. Factory
+    // racks are read-only, so this falls back to a hint pointing at Save as…
+    const overwriteBtn = el('button', 'small', 'Save');
+    overwriteBtn.title = 'Overwrite the selected user rack with the current settings';
+    overwriteBtn.addEventListener('click', () => {
+      if (!selectedValue.startsWith('user:')) {
+        alert('Select one of your saved racks to overwrite, or use “Save as…” to create a new one.');
+        return;
+      }
+      const name = selectedValue.slice(5);
+      const user = getUserFxRacks();
+      user[name] = captureCurrentFxRack();
+      setUserFxRacks(user);
+      populate('user:' + name);
+    });
 
     const saveBtn = el('button', 'small', 'Save as…');
     saveBtn.addEventListener('click', () => {
@@ -10663,6 +10684,7 @@
       populate();
     });
 
+    btnRow.appendChild(overwriteBtn);
     btnRow.appendChild(saveBtn);
     btnRow.appendChild(deleteBtn);
     m.appendChild(btnRow);
@@ -11191,8 +11213,11 @@
         const delay = Math.max(0, (t.nextNoteTime - audioCtx.currentTime) * 1000);
         const stepIdx = idx;
         setTimeout(() => { if (isPlaying) highlightStep(t, stepIdx); }, delay);
-        // swing: even step → +swing, odd step → -swing (so pair preserves tempo)
-        const swingFactor = ((t.nextStep % 2) === 0) ? (1 + (t.swing || 0)) : (1 - (t.swing || 0));
+        // swing: even step → +swing, odd step → -swing (so pair preserves tempo).
+        // Clamp to 0.9 so the off-beat keeps at least 10% of its slot even at
+        // heavy shuffle settings — the two steps can never collide.
+        const sw = clamp(t.swing || 0, 0, 0.9);
+        const swingFactor = ((t.nextStep % 2) === 0) ? (1 + sw) : (1 - sw);
         t.nextNoteTime += sDur * swingFactor;
         t.nextStep++;
       }
