@@ -1972,6 +1972,31 @@
     flex-shrink: 0;
   }
   body.mode-live .toggle { width: 20px; height: 20px; font-size: 9px; }
+  /* Live mode is a performance view: arm is the primary control, so make it
+     big and give the armed state the accent colour. The randomize / sync /
+     nudge tools are sequencer-editing actions, not performance ones, so drop
+     them from the live channel strip (mirrors the Track-mode hide rule). */
+  body.mode-live .toggle.rnd,
+  body.mode-live .toggle.sync,
+  body.mode-live .toggle.nudge { display: none !important; }
+  body.mode-live .toggles { align-items: center; }
+  body.mode-live .toggle.arm {
+    width: 50px;
+    height: 28px;
+    font-size: 0;            /* hide the single-letter "A" label */
+    font-weight: 700;
+    border-width: 2px;
+  }
+  body.mode-live .toggle.arm::after {
+    content: "ARM";
+    font-size: 11px;
+    letter-spacing: 1px;
+  }
+  body.mode-live .toggle.arm.on {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+  }
   /* Per-channel volume slider — stacks label above the slider + readout. */
   body.mode-live .live-vol-row {
     display: flex;
