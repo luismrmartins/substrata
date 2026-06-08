@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
 <title>substrata</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -3019,14 +3019,65 @@
     body.mode-effects .mixer { bottom: var(--mobile-footer-h); }
     body.mode-effects.mixer-collapsed { padding-bottom: calc(var(--mobile-footer-h) + 48px); }
 
-    /* ============ LIVE MODE: vertical stack ============ */
+    /* ============ LIVE MODE: reflow every wide strip ============
+       Live is built from wide horizontal bars (decks side by side, master
+       bar, EQ rows, channel grids) that ran ~800px and overflowed the
+       phone. Stack the decks, wrap every button/EQ row, and reflow the
+       channel strips into stacked cells so nothing runs off-screen. */
     body.mode-live {
+      padding: 8px 8px 0;
       padding-bottom: calc(var(--mobile-footer-h) + 16px);
+      overflow-x: hidden;
     }
-    .live-controls { flex-direction: column; }
-    .live-decks-row { grid-template-columns: 1fr; display: grid; gap: 12px; }
+    body.mode-live .layout { display: block; min-width: 0; }
+    body.mode-live main { min-width: 0; width: 100%; }
+    body.mode-live .live-controls { flex-direction: column; min-width: 0; }
+    body.mode-live .live-main-controls { min-width: 0; width: 100%; }
+
+    /* Cue */
+    .live-cue { width: 100%; min-width: 0; box-sizing: border-box; }
+    .live-cue-btns { flex-wrap: wrap; }
+
+    /* Decks stack vertically; their button rows wrap */
+    .live-decks-row { display: grid; grid-template-columns: 1fr; gap: 12px; }
+    .live-deck-ctrl { min-width: 0; width: 100%; box-sizing: border-box; }
     .live-deck-btns,
-    .live-deck-transport { flex-wrap: wrap; }
+    .live-deck-transport { flex-wrap: wrap; gap: 6px; }
+
+    /* The three EQ bands wrap and share the row evenly */
+    .live-deck-eq-bands { flex-wrap: wrap; gap: 8px 10px; }
+    .live-deck-eq-row { flex: 1 1 28%; min-width: 92px; }
+
+    /* Crossfader row fits */
+    .live-xfade-row { flex-wrap: wrap; gap: 6px 10px; }
+    .live-xfade-row #live-xfade { flex: 1 1 100%; min-width: 0; }
+
+    /* Master bar wraps; its EQ spreads across its own full-width row */
+    .live-master-row { flex-wrap: wrap; gap: 10px 14px; }
+    .live-master-eq {
+      flex: 1 1 100%;
+      flex-wrap: wrap;
+      justify-content: space-between;
+      gap: 8px 12px;
+    }
+    .live-master-groups { flex: 0 0 auto; }
+
+    /* Channel strips: stack the cells (name+tools on top, then sequences,
+       volume, morphs) so the morphs cell stops being clipped. */
+    body.mode-live .track {
+      grid-template-columns: 1fr auto !important;
+      grid-template-areas:
+        "name     tools"
+        "sections sections"
+        "volume   volume"
+        "morphs   morphs" !important;
+      column-gap: 8px;
+      row-gap: 8px;
+    }
+    body.mode-live .live-cell-sections,
+    body.mode-live .live-cell-volume,
+    body.mode-live .live-cell-morphs { min-width: 0; }
+    body.mode-live .live-cell-morphs .live-morph-slider { width: 100%; }
   }
 </style>
 </head>
