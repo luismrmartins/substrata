@@ -2763,6 +2763,9 @@
     #mode-toggle.transport-center {
       position: fixed;
       left: 0; right: 0; bottom: 0;
+      /* Force full viewport width — as a shrink-to-fit flex container the
+         bar otherwise hugs its three buttons and floats centered. */
+      width: 100vw;
       height: var(--mobile-footer-h);
       z-index: 200;
       display: flex;
@@ -2795,6 +2798,9 @@
       color: var(--accent);
       box-shadow: inset 0 2px 0 0 var(--accent);
     }
+
+    /* ---- Bigger dials for touch (Details + sequencer header knobs) ---- */
+    .knob .rotary { width: 40px; height: 40px; }
 
     /* ============ TRACK MODE: swipe pager ============ */
     body.mode-recording {
@@ -2949,6 +2955,33 @@
       min-width: 0;
       overflow: visible;
     }
+    /* Spread the dials across the full width of each card instead of a
+       left-packed single column: every knob becomes a centered
+       label · dial · value cell, and they wrap evenly across the box. */
+    body.mode-effects .module .fx-top {
+      flex-direction: row;
+      flex-wrap: wrap;
+      justify-content: space-around;
+      align-items: flex-start;
+      gap: 14px 8px;
+    }
+    body.mode-effects .module .fx-top > .row.rotary-row,
+    body.mode-effects .module .fx-top > .row.eq-row.rotary-row {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      grid-template-columns: none;
+      gap: 5px;
+      width: auto;
+    }
+    body.mode-effects .module .fx-top > .row.rotary-row > label,
+    body.mode-effects .module .fx-top > .row.rotary-row > .v {
+      text-align: center;
+      width: auto;
+    }
+    /* Full-width rows (selectors / sync toggles) keep spanning the card. */
+    body.mode-effects .module .fx-top > .row.wide { flex: 1 1 100%; }
+    body.mode-effects .module .fx-top .rotary { width: 42px; height: 42px; }
     /* Tall vertical faders are awkward to drag on a phone (and fight the
        page scroll) — lay the effect faders out horizontally instead: a
        full-width slider with the label on the left and value on the right.
