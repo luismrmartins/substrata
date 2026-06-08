@@ -2,6 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <title>substrata</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -672,6 +673,9 @@
     border: 1px dashed var(--line);
     border-radius: 3px;
     text-align: center;
+    overflow-wrap: anywhere;
+    max-width: 100%;
+    box-sizing: border-box;
   }
   .instrument-item {
     border: 1px solid var(--line);
@@ -2204,6 +2208,27 @@
     left: 0; width: 100%;
   }
   .lane-cell.vel .bar { bottom: 0; }
+  /* Accent lane — a click-to-toggle cell rather than a drag bar. The ">"
+     glyph sits faint until the step is accented, then lights up. */
+  .lane-cell.accent {
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 10px;
+    font-weight: 700;
+    line-height: 1;
+    color: var(--muted);
+    opacity: 0.5;
+  }
+  .lane-cell.accent:hover { opacity: 0.85; }
+  .lane-cell.accent.on {
+    color: var(--accent);
+    opacity: 1;
+    background: color-mix(in srgb, var(--accent) 22%, transparent);
+    border-color: var(--accent);
+  }
+  .lane-cell.accent.inactive { color: transparent; background: transparent; }
   .track:not(.expanded) .lane-cell { display: none; }
 
   .step-mini {
@@ -2689,6 +2714,221 @@
       font-size: 8px;
     }
   }
+
+  /* The Track-mode page indicator is mobile-only; hidden on desktop. */
+  .track-pager-tabs { display: none; }
+
+  /* ============================================================
+     MOBILE EXPERIENCE  (phones / very narrow viewports)
+     - Header (transport) wraps onto a couple of rows; the mode
+       switcher is pulled out into a fixed bottom tab bar (footer).
+     - Track mode turns its 3 columns into full-width swipe pages
+       (Instruments → Sequencer → Details) with a page indicator.
+     - Effects / Live get a lighter pass: vertical stacks that scroll
+       the page and clear the fixed footer.
+     ============================================================ */
+  @media (max-width: 720px) {
+    :root { --mobile-footer-h: 56px; }
+
+    /* ---- Header: stack into rows ---- */
+    .transport {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 6px 8px;
+      grid-template-columns: none;
+      margin-bottom: 8px;
+      padding-bottom: 8px;
+    }
+    .transport-left,
+    .transport-right {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 6px 8px;
+      width: 100%;
+      justify-self: stretch;
+    }
+    .transport-right { justify-content: flex-start; }
+    h1.title svg { height: 17px; }
+
+    /* ---- Mode switcher → fixed footer tab bar ---- */
+    #mode-toggle.transport-center {
+      position: fixed;
+      left: 0; right: 0; bottom: 0;
+      height: var(--mobile-footer-h);
+      z-index: 200;
+      display: flex;
+      gap: 0;
+      padding: 0;
+      margin: 0;
+      border: none;
+      border-top: 1px solid var(--line);
+      border-radius: 0;
+      background: var(--bg);
+      box-shadow: 0 -3px 14px rgba(0,0,0,0.20);
+      /* sit above the iOS home indicator */
+      padding-bottom: env(safe-area-inset-bottom, 0px);
+      box-sizing: content-box;
+    }
+    #mode-toggle.transport-center button {
+      flex: 1 1 0;
+      height: 100%;
+      margin: 0;
+      border: none;
+      border-radius: 0;
+      background: transparent;
+      color: var(--muted);
+      font-size: 11px;
+      letter-spacing: 0.6px;
+      text-transform: uppercase;
+    }
+    #mode-toggle.transport-center button.on {
+      background: transparent;
+      color: var(--accent);
+      box-shadow: inset 0 2px 0 0 var(--accent);
+    }
+
+    /* ============ TRACK MODE: swipe pager ============ */
+    body.mode-recording {
+      height: 100dvh;
+      min-height: 0;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      box-sizing: border-box;
+      padding: 8px 8px 0;
+      padding-bottom: calc(var(--mobile-footer-h) + env(safe-area-inset-bottom, 0px));
+    }
+    body.mode-recording .layout {
+      flex: 1 1 auto;
+      min-height: 0;
+      display: flex;
+      gap: 0;
+    }
+    body.mode-recording main {
+      flex: 1 1 auto;
+      min-width: 0;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+    }
+    /* The 3 columns become one horizontal scroll-snap track. */
+    body.mode-recording #tracks {
+      display: flex;
+      grid-template-columns: none;
+      flex: 1 1 auto;
+      min-height: 0;
+      height: auto;
+      gap: 0;
+      overflow-x: auto;
+      overflow-y: hidden;
+      scroll-snap-type: x mandatory;
+      scroll-behavior: smooth;
+      -webkit-overflow-scrolling: touch;
+      overscroll-behavior-x: contain;
+    }
+    body.mode-recording .panel-instruments,
+    body.mode-recording .panel-sequencer,
+    body.mode-recording .panel-details {
+      flex: 0 0 100%;
+      width: 100%;
+      max-width: 100%;
+      max-height: 100%;
+      min-height: 0;
+      overflow-y: auto;
+      overflow-x: hidden;
+      -webkit-overflow-scrolling: touch;
+      scroll-snap-align: start;
+      box-sizing: border-box;
+      padding: 4px 10px 12px;
+    }
+    body.mode-recording .panel-instruments {
+      border-right: none;
+      padding-right: 10px;
+    }
+    body.mode-recording .panel-details {
+      border-left: none;
+      padding-left: 10px;
+    }
+    /* The mini-mixer is redundant on mobile (per-channel A/M/S live in the
+       instrument list, volume lives in Details) — hide it so the pager is a
+       clean 3-page flow and the bottom is free for the footer. */
+    body.mode-recording .panel-mixer { display: none; }
+
+    /* Page indicator sits between the pager and the footer. */
+    body.mode-recording .track-pager-tabs {
+      display: flex;
+      flex: 0 0 auto;
+      gap: 6px;
+      justify-content: center;
+      padding: 6px 8px;
+      border-top: 1px solid var(--line);
+      background: var(--bg);
+    }
+    .track-pager-tabs button {
+      flex: 1 1 0;
+      max-width: 150px;
+      padding: 7px 4px;
+      font: inherit;
+      font-size: 9px;
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+      color: var(--muted);
+      background: transparent;
+      border: 1px solid var(--line);
+      border-radius: 5px;
+      cursor: pointer;
+    }
+    .track-pager-tabs button.on {
+      color: var(--accent);
+      border-color: var(--accent);
+    }
+
+    /* Make the per-step grid breathe a little inside its page. */
+    body.mode-recording .panel-sequencer .steps-row { gap: 4px; }
+    /* The sequencer header (name · banks · actions · preview) and the group
+       row are wide horizontal strips — let them wrap so they never force the
+       page wider than the screen. */
+    body.mode-recording .panel-track-name-row,
+    body.mode-recording .panel-groups-row {
+      flex-wrap: wrap;
+      gap: 8px 10px;
+    }
+    body.mode-recording .panel-track-name-row .pattern-preview { margin-left: auto; }
+
+    /* ============ EFFECTS MODE: vertical stack ============ */
+    body.mode-effects {
+      height: auto;
+      overflow: visible;
+      display: block;
+      padding: 10px 8px;
+      padding-bottom: calc(var(--mobile-footer-h) + 270px);
+    }
+    body.mode-effects .layout { display: block; min-height: 0; }
+    body.mode-effects main { display: block; }
+    body.mode-effects .side {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      overflow: visible;
+      min-height: 0;
+    }
+    body.mode-effects .module { min-width: 0; }
+    /* The decks mixer is fixed at the bottom in Effects mode — lift it above
+       the footer so both stay tappable. */
+    body.mode-effects .mixer { bottom: var(--mobile-footer-h); }
+    body.mode-effects.mixer-collapsed { padding-bottom: calc(var(--mobile-footer-h) + 48px); }
+
+    /* ============ LIVE MODE: vertical stack ============ */
+    body.mode-live {
+      padding-bottom: calc(var(--mobile-footer-h) + 16px);
+    }
+    .live-controls { flex-direction: column; }
+    .live-decks-row { grid-template-columns: 1fr; display: grid; gap: 12px; }
+    .live-deck-btns,
+    .live-deck-transport { flex-wrap: wrap; }
+  }
 </style>
 </head>
 <body class="mode-recording">
@@ -2810,6 +3050,14 @@
         </div>
       </div>
       <div id="tracks" class="tracks"></div>
+      <!-- Mobile-only page indicator for Track mode. The three Track-mode
+           panels become full-width swipe pages on phones; these tabs show
+           where you are and let you jump directly. Hidden on desktop. -->
+      <nav id="track-pager-tabs" class="track-pager-tabs" aria-label="Track sections">
+        <button type="button" data-page="0" class="on">Instruments</button>
+        <button type="button" data-page="1">Sequencer</button>
+        <button type="button" data-page="2">Details</button>
+      </nav>
       <section class="mixer" id="mixer"></section>
     </main>
 
@@ -2850,6 +3098,51 @@
   const bpmInput = document.getElementById('bpm');
   const playBtn  = document.getElementById('play');
   const tracksEl = document.getElementById('tracks');
+
+  // ---------- Mobile Track-mode pager ----------
+  // On phones the three Track-mode columns (Instruments / Sequencer / Details)
+  // become full-width horizontal swipe pages. These helpers keep the bottom
+  // page indicator in sync with the scroll position and let the user (or a
+  // selection action) jump straight to a page. No-ops on desktop.
+  const trackPagerTabs = document.getElementById('track-pager-tabs');
+  const PAGER_MQ = window.matchMedia('(max-width: 720px)');
+  let mobilePage = 0;            // 0=Instruments, 1=Sequencer, 2=Details
+  const isMobilePager = () => PAGER_MQ.matches && currentMode === 'recording';
+  function setActivePagerTab(page) {
+    mobilePage = Math.max(0, Math.min(2, page));
+    if (!trackPagerTabs) return;
+    trackPagerTabs.querySelectorAll('button')
+      .forEach(b => b.classList.toggle('on', +b.dataset.page === mobilePage));
+  }
+  function scrollTracksToPage(page, smooth) {
+    setActivePagerTab(page);
+    if (!PAGER_MQ.matches) return;
+    const w = tracksEl.clientWidth || 1;
+    tracksEl.scrollTo({ left: mobilePage * w, behavior: smooth ? 'smooth' : 'auto' });
+  }
+  // Re-apply the current page after a full rebuild (rebuildTracksUI wipes and
+  // recreates #tracks, which resets scrollLeft to 0).
+  function restorePagerPage() {
+    if (!isMobilePager()) return;
+    requestAnimationFrame(() => {
+      tracksEl.scrollLeft = mobilePage * (tracksEl.clientWidth || 0);
+      setActivePagerTab(mobilePage);
+    });
+  }
+  if (trackPagerTabs) {
+    trackPagerTabs.querySelectorAll('button').forEach(b => {
+      b.addEventListener('click', () => scrollTracksToPage(+b.dataset.page, true));
+    });
+  }
+  let _pagerRaf = 0;
+  tracksEl.addEventListener('scroll', () => {
+    if (!isMobilePager() || _pagerRaf) return;
+    _pagerRaf = requestAnimationFrame(() => {
+      _pagerRaf = 0;
+      const w = tracksEl.clientWidth || 1;
+      setActivePagerTab(Math.round(tracksEl.scrollLeft / w));
+    });
+  });
 
   let projectDir = null;
   let currentProjectName = '';
@@ -3118,11 +3411,22 @@
     const eg = ctx.createGain();
     const a = Math.max(0.0005, tr.ampAttack != null ? tr.ampAttack : 0.002);
     const len = Math.max(0.01, tr.ampDecay != null ? tr.ampDecay : 2.0);
+    // Attack ramp up to unity.
     eg.gain.setValueAtTime(0.0001, at);
     eg.gain.linearRampToValueAtTime(1, at + a);
+    // Hold at unity for the body of the sound (keeps the naturally-short
+    // voices fully transparent), then release with an exponential tail that
+    // scales with Len. The old envelope chopped the gate shut with a hard
+    // 5 ms linear ramp, which clicked on still-ringing tails and truncated
+    // the sound abruptly. An exponential release rings out naturally and —
+    // when Len is dialled down — gives a musical percussive decay instead of
+    // a gate. The release time grows with Len but stays bounded so it never
+    // smears short, snappy hits.
     const gateEnd = at + Math.max(a, len);
+    const rel = clamp(len * 0.3, 0.012, 0.18);
     eg.gain.setValueAtTime(1, gateEnd);
-    eg.gain.linearRampToValueAtTime(0.0001, gateEnd + 0.005);
+    eg.gain.exponentialRampToValueAtTime(0.0009, gateEnd + rel);
+    eg.gain.linearRampToValueAtTime(0.0001, gateEnd + rel + 0.004);
     eg.connect(dest);
     return eg;
   }
@@ -9406,10 +9710,23 @@
             });
             sel.appendChild(og);
           }
+          // Restore the last-loaded preset so its name keeps showing after a
+          // rebuild. buildKnobs / rebuildTracksUI recreate this <select> from
+          // scratch on every knob tweak and mode switch, which used to snap it
+          // back to "(load…)" the instant a preset was chosen — making names
+          // like "Dark Hat" or "Punchy Kick" vanish. Only re-select if the
+          // option still exists (e.g. a deleted user preset falls back).
+          if (track._presetValue &&
+              sel.querySelector('option[value="' + CSS.escape(track._presetValue) + '"]')) {
+            sel.value = track._presetValue;
+          } else {
+            track._presetValue = '';
+          }
         };
         refreshSel();
         sel.addEventListener('change', () => {
-          if (!sel.value) return;
+          if (!sel.value) { track._presetValue = ''; return; }
+          track._presetValue = sel.value;
           const idx = sel.value.indexOf(':');
           const src = sel.value.slice(0, idx);
           const rest = sel.value.slice(idx + 1);
@@ -9451,6 +9768,7 @@
           const name = window.prompt('Save ' + track.kind + ' preset as:', suggested);
           if (!name) return;
           setPreset(track.kind, name, getTrackPresetParams(track));
+          track._presetValue = 'u:' + name;
           refreshSel();
           sel.value = 'u:' + name;
         });
@@ -10107,7 +10425,7 @@
       renderStep(cell, track, i);
 
       // forward refs so the click handler can refresh the lanes when a step is toggled off
-      let velRef = null, panRef = null, lenRef = null;
+      let velRef = null, panRef = null, lenRef = null, accRef = null;
 
       cell.addEventListener('click', (e) => {
         if ((track.kind === 'bass' || track.kind === 'lead' || track.kind === 'sh101' || track.kind === 'juno' || track.kind === 'cs80') && e.shiftKey) {
@@ -10122,6 +10440,7 @@
         if (velRef) renderLane(velRef, track, i, 'vel');
         if (panRef) renderLane(panRef, track, i, 'pan');
         if (lenRef) renderLane(lenRef, track, i, 'length');
+        if (accRef) renderAccent(accRef, track, i);
       });
 
       if (track.kind === 'bass' || track.kind === 'lead' || track.kind === 'sh101' || track.kind === 'juno' || track.kind === 'cs80' || track.kind === 'granular' || track.kind === 'mellotron') {
@@ -10271,12 +10590,27 @@
         lenRef = len;
       }
 
+      // Accent toggle lane — a per-step on/off (unlike the continuous vel /
+      // pan / length lanes) that boosts the step so it punches above the
+      // others. Click to flip; only meaningful when the step itself is on.
+      const acc = el('div', 'lane-cell accent', '>');
+      acc.title = 'accent — click to emphasise this step';
+      renderAccent(acc, track, i);
+      acc.addEventListener('click', () => {
+        const entry = track.pattern[i];
+        if (!entry) return;
+        entry.accent = !entry.accent;
+        renderAccent(acc, track, i);
+      });
+      col.appendChild(acc);
+      accRef = acc;
+
       track.stepsEl.appendChild(col);
     }
   }
 
   function defaultEntry(track) {
-    const base = { vel: 1, pan: 0 };
+    const base = { vel: 1, pan: 0, accent: false };
     const len = track.noteLen != null ? track.noteLen : 1.0;
     if (track.kind === 'bass' || track.kind === 'lead' || track.kind === 'sh101' || track.kind === 'juno' || track.kind === 'cs80') return { ...base, pitch: 0, slide: false, length: len };
     if (track.kind === 'granular') return { ...base, pitch: 0, length: len };
@@ -10335,6 +10669,12 @@
       bar.style.top = ''; bar.style.bottom = '0';
       bar.style.height = Math.min(100, (v / 3) * 100) + '%';
     }
+  }
+  function renderAccent(cellEl, track, i) {
+    const entry = track.pattern[i];
+    cellEl.classList.toggle('on', !!(entry && entry.accent));
+    // Hide the glyph entirely on empty steps so the lane reads as inactive.
+    cellEl.classList.toggle('inactive', !entry);
   }
   function attachLaneDrag(cellEl, track, i, kind) {
     const beginDrag = (initialY) => {
@@ -11150,6 +11490,10 @@
     }
   }
 
+  // How much an accented step boosts its trigger gain above the step's own
+  // velocity. +60% (~+4 dB) lets accents punch above the rest of the pattern;
+  // clamped below so even a full-velocity accented step can't run away.
+  const ACCENT_BOOST = 0.6;
   function scheduler() {
     const horizon = audioCtx.currentTime + SCHEDULE_AHEAD;
     const sDur = stepDuration();
@@ -11178,6 +11522,10 @@
         if (entry && audible) {
           const vel = entry.vel ?? 1;
           const pan = entry.pan ?? 0;
+          // Accent rides on top of the step's velocity so emphasised steps
+          // cut through. Works for every instrument kind since it acts on the
+          // shared per-trigger gain below.
+          const effVel = entry.accent ? Math.min(2, vel * (1 + ACCENT_BOOST)) : vel;
           // mono: fade out the previous trigger fast so only one voice sounds at a time
           if (t.mono && t._lastTrigGain) {
             const g = t._lastTrigGain.gain;
@@ -11193,7 +11541,7 @@
           // trigger boundary itself never produces a click, regardless of voice attack.
           const tg = audioCtx.createGain();
           tg.gain.setValueAtTime(0.0001, t.nextNoteTime);
-          tg.gain.exponentialRampToValueAtTime(Math.max(0.0001, vel), t.nextNoteTime + 0.002);
+          tg.gain.exponentialRampToValueAtTime(Math.max(0.0001, effVel), t.nextNoteTime + 0.002);
           const tp = audioCtx.createStereoPanner(); tp.pan.value = pan;
           tg.connect(tp).connect(t.input);
           const env = {
@@ -11881,7 +12229,14 @@
           if (e.target.closest('button, input, select, textarea')) return;
           if (selectedTrackId !== t.id) {
             selectedTrackId = t.id;
+            // On mobile, picking an instrument advances straight to its
+            // sequencer page (page 1) so editing is one tap away.
+            if (PAGER_MQ.matches) mobilePage = 1;
             rebuildTracksUI();
+          } else if (PAGER_MQ.matches) {
+            // Re-tapping the already-selected instrument still slides over to
+            // the sequencer.
+            scrollTracksToPage(1, true);
           }
         });
         const clearDropMarks = () =>
@@ -12042,6 +12397,7 @@
       // heights. Measure the available room inside each strip after the
       // browser lays everything out and pin the fader + meter to it.
       requestAnimationFrame(() => resizeMixerStrips(mixPanel));
+      restorePagerPage();
       return;
     }
 
@@ -12422,7 +12778,8 @@
         const time = stepDur * i;
         const vel = entry.vel ?? 1;
         const pan = entry.pan ?? 0;
-        const tg = offline.createGain(); tg.gain.value = vel;
+        const effVel = entry.accent ? Math.min(2, vel * (1 + ACCENT_BOOST)) : vel;
+        const tg = offline.createGain(); tg.gain.value = effVel;
         const tp = offline.createStereoPanner(); tp.pan.value = pan;
         tg.connect(tp).connect(input);
         const env = { stepDur, prevFreq, prevSlide };
