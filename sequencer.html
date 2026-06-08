@@ -226,6 +226,9 @@
     font-variant-numeric: tabular-nums;
     font-size: 10px;
   }
+  /* The dial twin of the vertical fader is desktop-hidden; the mobile rules
+     swap it in for the (touch-unfriendly) native range input. */
+  .vfader-dial { display: none; }
   /* FX rack list — replaces the dropdown. Scrollable vertical list with
      subtle section headers (Factory / User) and an accent highlight on
      the selected entry. Lives inside the fx-racks card. */
@@ -2984,49 +2987,32 @@
     /* Full-width rows (selectors / sync toggles) keep spanning the card. */
     body.mode-effects .module .fx-top > .row.wide { flex: 1 1 100%; }
     body.mode-effects .module .fx-top .rotary { width: 42px; height: 42px; }
-    /* Tall vertical faders are awkward to drag on a phone (and fight the
-       page scroll) — lay the effect faders out horizontally instead: a
-       full-width slider with the label on the left and value on the right.
-       !important overrides the inline pixel height set by
-       resizeEffectsFaders() for the desktop vertical layout. */
+    /* The primary-parameter fader is a native range input, which doesn't
+       drag reliably on touch. On phones swap in its rotary-dial twin (same
+       pointer-event engine as the other dials) — a centered label · dial ·
+       value cell, sitting inline right after the knobs. */
     body.mode-effects .module > .row.vfader-row {
-      flex-direction: row;
+      flex-direction: column;
       align-items: center;
-      gap: 8px;
-      padding-top: 8px;
-      /* Sit inline right after the knobs instead of being pinned to the
-         (now content-height) card bottom. */
+      gap: 5px;
+      padding-top: 10px;
       margin-top: 0;
     }
-    body.mode-effects .module .row.vfader-row > label {
-      flex: 0 0 auto;
-      min-width: 40px;
-    }
+    body.mode-effects .module .vfader { display: none; }
     body.mode-effects .module .vfader-wrap {
-      flex: 1 1 auto;
-      flex-direction: row;
+      flex-direction: column;
       align-items: center;
-      gap: 8px;
+      gap: 5px;
       width: auto;
     }
-    body.mode-effects .module .vfader {
-      flex: 1 1 auto;
-      width: 100% !important;
-      height: 22px !important;
-      min-height: 0 !important;
-      -webkit-appearance: auto;
-      appearance: auto;
-      writing-mode: horizontal-tb;
-      direction: ltr;
-      /* Native range inputs must NOT inherit the dials' touch-action:none
-         (that blocks the thumb drag on touch). pan-y lets a horizontal drag
-         move the slider while a vertical drag still scrolls the page. */
-      touch-action: pan-y;
+    body.mode-effects .module .vfader-dial {
+      display: block;
+      width: 48px;
+      height: 48px;
     }
+    body.mode-effects .module .vfader-row > label,
     body.mode-effects .module .vfader-row .v {
-      flex: 0 0 auto;
-      min-width: 38px;
-      text-align: right;
+      text-align: center;
     }
     /* The decks mixer is fixed at the bottom in Effects mode — lift it above
        the footer so both stay tappable. */
@@ -6374,12 +6360,26 @@
     const r = el('input', 'vfader');
     r.type = 'range'; r.min = min; r.max = max; r.step = step; r.value = val;
     const v = el('span', 'v', fmt(val));
+    // A rotary dial bound to the same value. Native range inputs don't drag
+    // reliably on mobile touch, so phones show this dial (the proven
+    // pointer-event control) while desktop keeps the vertical fader — CSS
+    // toggles which one is visible. Both edits stay in sync.
+    const snap = (x) => step ? min + Math.round((x - min) / step) * step : x;
+    const dial = makeRotary(min, max, val, (raw) => {
+      const x = clamp(snap(raw), min, max);
+      r.value = x;
+      v.textContent = fmt(x);
+      onChange(x);
+    }, fmt);
+    dial.classList.add('vfader-dial');
     r.addEventListener('input', () => {
       const x = parseFloat(r.value);
       v.textContent = fmt(x);
       onChange(x);
+      if (dial._setValue) dial._setValue(x);
     });
     wrap.appendChild(r);
+    wrap.appendChild(dial);
     wrap.appendChild(v);
     row.appendChild(wrap);
     parent.appendChild(row);
