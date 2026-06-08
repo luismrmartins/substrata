@@ -2893,14 +2893,24 @@
     }
 
     /* On phones the 16+ step grid would run off the screen. Lock it to a
-       grid of at most 8 steps per row (each column sized to its step-col),
-       so 16 steps becomes two clean rows of 8, 32 becomes four, etc. */
+       grid of at most 8 steps per row (16 → two rows of 8, 32 → four). The
+       columns are 1fr so the row spans the full panel width — no blank gap
+       on the right — and the cells stretch to fill, giving bigger touch
+       targets. */
     body.mode-recording .panel-sequencer .steps-row {
       display: grid;
-      grid-template-columns: repeat(8, auto);
-      justify-content: center;
-      gap: 8px 5px;
+      grid-template-columns: repeat(8, 1fr);
+      gap: 10px 6px;
+      /* The base rule pins this to width:max-content (so the 16-wide desktop
+         grid hugs its cells) — override it so the 8-wide mobile grid spans
+         the whole panel. */
+      width: 100%;
     }
+    body.mode-recording .panel-sequencer .step-col { width: 100%; min-width: 0; }
+    body.mode-recording .panel-sequencer .step,
+    body.mode-recording .panel-sequencer .lane-cell { width: 100%; min-width: 0; }
+    body.mode-recording .panel-sequencer .step-mini { width: 100%; }
+    body.mode-recording .panel-sequencer .step-mini button { flex: 1 1 0; min-width: 0; }
     /* The sequencer header (name · banks · actions · preview) and the group
        row are wide horizontal strips — let them wrap so they never force the
        page wider than the screen. */
@@ -2928,7 +2938,57 @@
       overflow: visible;
       min-height: 0;
     }
-    body.mode-effects .module { min-width: 0; }
+    /* Cards size to their content in the vertical stack (no fixed-height
+       clipping from the desktop side-by-side layout). */
+    body.mode-effects .module {
+      flex: 0 0 auto;
+      height: auto;
+      /* Override the 320px min-height the ≤900px tablet rule sets for tall
+         vertical faders — our faders are horizontal, so cards hug content. */
+      min-height: 0;
+      min-width: 0;
+      overflow: visible;
+    }
+    /* Tall vertical faders are awkward to drag on a phone (and fight the
+       page scroll) — lay the effect faders out horizontally instead: a
+       full-width slider with the label on the left and value on the right.
+       !important overrides the inline pixel height set by
+       resizeEffectsFaders() for the desktop vertical layout. */
+    body.mode-effects .module > .row.vfader-row {
+      flex-direction: row;
+      align-items: center;
+      gap: 8px;
+      padding-top: 8px;
+      /* Sit inline right after the knobs instead of being pinned to the
+         (now content-height) card bottom. */
+      margin-top: 0;
+    }
+    body.mode-effects .module .row.vfader-row > label {
+      flex: 0 0 auto;
+      min-width: 40px;
+    }
+    body.mode-effects .module .vfader-wrap {
+      flex: 1 1 auto;
+      flex-direction: row;
+      align-items: center;
+      gap: 8px;
+      width: auto;
+    }
+    body.mode-effects .module .vfader {
+      flex: 1 1 auto;
+      width: 100% !important;
+      height: 22px !important;
+      min-height: 0 !important;
+      -webkit-appearance: auto;
+      appearance: auto;
+      writing-mode: horizontal-tb;
+      direction: ltr;
+    }
+    body.mode-effects .module .vfader-row .v {
+      flex: 0 0 auto;
+      min-width: 38px;
+      text-align: right;
+    }
     /* The decks mixer is fixed at the bottom in Effects mode — lift it above
        the footer so both stay tappable. */
     body.mode-effects .mixer { bottom: var(--mobile-footer-h); }
