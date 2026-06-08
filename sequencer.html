@@ -1780,9 +1780,6 @@
     touch-action: none;
   }
   .rotary:hover { border-color: var(--text); }
-  /* Same gesture-capture for the vertical faders so dragging them doesn't
-     scroll the page (notably in the vertically-scrolling Effects view). */
-  .vfader, .mix-fader { touch-action: none; }
   .rotary-arc {
     position: absolute;
     inset: 0;
@@ -2758,6 +2755,11 @@
     }
     .transport-right { justify-content: flex-start; }
     h1.title svg { height: 17px; }
+    /* The project-folder picker (File System Access API) only exists in
+       desktop Chrome/Edge — not in any mobile browser. Hide it on phones so
+       it can't show a misleading "requires Chrome" prompt; Save / Load
+       (download + file input) still work. */
+    #folder, #folder-name { display: none; }
 
     /* ---- Mode switcher → fixed footer tab bar ---- */
     #mode-toggle.transport-center {
@@ -3016,6 +3018,10 @@
       appearance: auto;
       writing-mode: horizontal-tb;
       direction: ltr;
+      /* Native range inputs must NOT inherit the dials' touch-action:none
+         (that blocks the thumb drag on touch). pan-y lets a horizontal drag
+         move the slider while a vertical drag still scrolls the page. */
+      touch-action: pan-y;
     }
     body.mode-effects .module .vfader-row .v {
       flex: 0 0 auto;
