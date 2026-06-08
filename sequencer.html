@@ -2885,8 +2885,15 @@
       border-color: var(--accent);
     }
 
-    /* Make the per-step grid breathe a little inside its page. */
-    body.mode-recording .panel-sequencer .steps-row { gap: 4px; }
+    /* On phones the 16+ step grid would run off the screen. Lock it to a
+       grid of at most 8 steps per row (each column sized to its step-col),
+       so 16 steps becomes two clean rows of 8, 32 becomes four, etc. */
+    body.mode-recording .panel-sequencer .steps-row {
+      display: grid;
+      grid-template-columns: repeat(8, auto);
+      justify-content: center;
+      gap: 8px 5px;
+    }
     /* The sequencer header (name · banks · actions · preview) and the group
        row are wide horizontal strips — let them wrap so they never force the
        page wider than the screen. */
