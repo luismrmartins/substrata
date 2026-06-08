@@ -1774,8 +1774,15 @@
     cursor: ns-resize;
     user-select: none;
     flex-shrink: 0;
+    /* Claim the touch gesture so dragging the dial drives it instead of
+       scrolling the page underneath (pointerdown.preventDefault alone does
+       not stop touch-scroll — touch-action must opt out). */
+    touch-action: none;
   }
   .rotary:hover { border-color: var(--text); }
+  /* Same gesture-capture for the vertical faders so dragging them doesn't
+     scroll the page (notably in the vertically-scrolling Effects view). */
+  .vfader, .mix-fader { touch-action: none; }
   .rotary-arc {
     position: absolute;
     inset: 0;
