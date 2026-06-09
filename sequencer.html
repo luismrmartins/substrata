@@ -11775,13 +11775,37 @@
       (t.kind === 'mic' && t.enabled) ||
       (t.kind === 'granular' && t.stream));
   }
+  // The two-deck loop players on the Effects/Mixer tab run their own buffer
+  // sources, independent of the sequencer's isPlaying flag.
+  function decksPlaying() {
+    return !!((decks.A && decks.A.playing) || (decks.B && decks.B.playing));
+  }
+  // Final safety net: is the master output actually making sound right now?
+  // Catches ringing tails and any audio source we haven't explicitly listed,
+  // so the engine is never parked mid-sound. masterMeter is kept permanently
+  // connected (see the meter loop) precisely so this stays reliable.
+  function masterAudible() {
+    if (!masterMeter) return false;
+    const b = new Float32Array(masterMeter.fftSize);
+    masterMeter.getFloatTimeDomainData(b);
+    for (let i = 0; i < b.length; i++) if (Math.abs(b[i]) > 0.0008) return true;
+    return false;
+  }
+  function maybeSuspend() {
+    _suspendTimer = null;
+    if (!audioCtx || audioCtx.state !== 'running') return;
+    if (isPlaying) return;   // start()/stop() own the timer while sequencing
+    // Anything still sounding (a deck loop, a live input, a tail) — wait and
+    // re-check rather than cutting it off.
+    if (decksPlaying() || liveInputActive() || masterAudible()) {
+      _suspendTimer = setTimeout(maybeSuspend, 3000);
+      return;
+    }
+    audioCtx.suspend();
+  }
   function scheduleAudioSuspend() {
     cancelAudioSuspend();
-    _suspendTimer = setTimeout(() => {
-      _suspendTimer = null;
-      if (!audioCtx || isPlaying || liveInputActive()) return;
-      if (audioCtx.state === 'running') audioCtx.suspend();
-    }, 3000);
+    _suspendTimer = setTimeout(maybeSuspend, 3000);
   }
 
   function start() {
@@ -12855,13 +12879,11 @@
         setTrkTap(t, vis);
         if (vis) setMeterSegs(t._meterSegs, meterPeak(t.trkMeter, buf));
       }
-      if (masterMeter) {
-        const mvis = visible(_masterMeterSegs);
-        if (_masterMeterTapOn !== mvis && masterOut) {
-          try { mvis ? masterOut.connect(masterMeter) : masterOut.disconnect(masterMeter); } catch (e) {}
-          _masterMeterTapOn = mvis;
-        }
-        if (mvis) setMeterSegs(_masterMeterSegs, meterPeak(masterMeter, buf));
+      // masterMeter stays permanently connected (cheap — one analyser) so the
+      // suspend safety check can always read the true output level; we just
+      // skip the DOM update when its meter isn't on screen.
+      if (masterMeter && visible(_masterMeterSegs)) {
+        setMeterSegs(_masterMeterSegs, meterPeak(masterMeter, buf));
       }
     };
     requestAnimationFrame(loop);
@@ -13048,6 +13070,7 @@
     const d = decks[k];
     if (!d.buffer) return;
     initAudio();
+    cancelAudioSuspend();
     if (audioCtx.state === 'suspended') audioCtx.resume();
     stopDeck(k, btn);
     const src = audioCtx.createBufferSource();
@@ -13065,6 +13088,7 @@
     }
     d.playing = false;
     if (btn) { btn.textContent = 'Play'; btn.classList.remove('on'); }
+    if (!isPlaying) scheduleAudioSuspend();
   }
   function buildDeck(k) {
     const d = decks[k];
