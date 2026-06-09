@@ -4703,6 +4703,7 @@
     listenBtn.classList.remove('on');
     recBtn.disabled = true;
     statusEl.textContent = track.buffer ? track.buffer.duration.toFixed(2) + 's loaded' : 'no sample';
+    if (!isPlaying) scheduleAudioSuspend();
   }
   function pickGranularMime() {
     if (!window.MediaRecorder) return '';
@@ -6144,6 +6145,7 @@
     lofiOut.connect(masterLP).connect(masterHP).connect(masterLimiter)
            .connect(masterOut).connect(audioCtx.destination);
     masterOut.connect(masterMeter);
+    _masterMeterTapOn = true;
     startMeterLoop();
 
     delayBus  = audioCtx.createGain();
@@ -11758,11 +11760,39 @@
       }
     }
   }
+  // ---- Audio-engine power management ----
+  // When nothing is sounding we suspend the AudioContext, which stops the
+  // audio thread from processing the (silent) effect chains every block —
+  // a meaningful battery saving on mobile. We wait a few seconds first so
+  // reverb / delay tails ring out, and never park while a mic or granular
+  // input is being monitored live.
+  let _suspendTimer = null;
+  function cancelAudioSuspend() {
+    if (_suspendTimer) { clearTimeout(_suspendTimer); _suspendTimer = null; }
+  }
+  function liveInputActive() {
+    return tracks.some(t =>
+      (t.kind === 'mic' && t.enabled) ||
+      (t.kind === 'granular' && t.stream));
+  }
+  function scheduleAudioSuspend() {
+    cancelAudioSuspend();
+    _suspendTimer = setTimeout(() => {
+      _suspendTimer = null;
+      if (!audioCtx || isPlaying || liveInputActive()) return;
+      if (audioCtx.state === 'running') audioCtx.suspend();
+    }, 3000);
+  }
+
   function start() {
     initAudio();
-    if (audioCtx.state === 'suspended') audioCtx.resume();
+    cancelAudioSuspend();
+    const wasSuspended = audioCtx.state === 'suspended';
+    if (wasSuspended) audioCtx.resume();
     isPlaying = true;
-    const startTime = audioCtx.currentTime + 0.05;
+    // Extra headroom when resuming from suspend covers the (async) resume
+    // latency so the first scheduled notes never land in the past.
+    const startTime = audioCtx.currentTime + (wasSuspended ? 0.12 : 0.05);
     for (const t of tracks) {
       t.nextStep = 0;
       t.nextNoteTime = startTime;
@@ -11779,6 +11809,7 @@
     for (const t of tracks) highlightStep(t, -1);
     playBtn.textContent = '▶';
     playBtn.classList.remove('playing');
+    scheduleAudioSuspend();
   }
   playBtn.addEventListener('click', () => { isPlaying ? stop() : start(); });
 
@@ -11892,6 +11923,7 @@
       t.trkLpf.connect(t.duckGain);
     }
     t.duckGain.connect(t.trkMeter);
+    t._meterTapOn = true;   // meter analyser tap is live (see meter loop)
     t.duckGain.connect(deckBusInputFor(t.deck));
     t.duckGain.connect(t.delaySendN).connect(delayBus);
     t.duckGain.connect(t.reverbSendN).connect(reverbBus);
@@ -12140,6 +12172,7 @@
   function previewTrack(track) {
     if (!track || track.kind === 'mic' || !track.voice) return;
     initAudio();
+    cancelAudioSuspend();
     if (audioCtx.state === 'suspended') audioCtx.resume();
     if (!track.input) initTrackAudio(track);
     const bpm = parseFloat(bpmInput.value) || 120;
@@ -12150,6 +12183,9 @@
     const pDest = (track.kind === 'drum') ? drumEnvNode(audioCtx, at, track, track.input) : track.input;
     try { track.voice(audioCtx, at, pDest, track, step, env); }
     catch (e) { console.warn('Preview failed:', e); }
+    // Re-park the engine a few seconds after the audition (no-op if playback
+    // or a live input is going).
+    if (!isPlaying) scheduleAudioSuspend();
   }
 
   // ---------- Per-track A / B / C morph ----------
@@ -12722,6 +12758,7 @@
   let _meterLast = 0;
   let _masterMeterFill  = null;
   let _masterMeterSegs  = null;
+  let _masterMeterTapOn = false;
   // Build a vertical segmented meter (N square cells stacked bottom-up).
   // Each segment gets a position-derived green→yellow→red colour pair
   // (faint off / full on) so the scale is always visible.
@@ -12797,6 +12834,15 @@
     // and DOM writes entirely. Reads are paint-safe (the 'lit' class only
     // changes colour), so this doesn't thrash layout.
     const visible = (segs) => segs && segs[0] && segs[0].offsetParent !== null;
+    // Connect the analyser tap only while its meter is on screen, so the
+    // audio thread doesn't feed analysers nobody is watching (e.g. the whole
+    // mixer in mobile Track mode). The taps are parallel observers, so
+    // toggling them never affects the audible signal.
+    const setTrkTap = (t, on) => {
+      if (t._meterTapOn === on || !t.duckGain || !t.trkMeter) return;
+      try { on ? t.duckGain.connect(t.trkMeter) : t.duckGain.disconnect(t.trkMeter); } catch (e) {}
+      t._meterTapOn = on;
+    };
     const loop = () => {
       if (!audioCtx) { _meterLoopRunning = false; return; }
       requestAnimationFrame(loop);    // rAF auto-pauses when the page is hidden
@@ -12804,12 +12850,18 @@
       if (now - _meterLast < 32) return;   // ~30 fps is plenty for level meters
       _meterLast = now;
       for (const t of tracks) {
-        if (t.trkMeter && visible(t._meterSegs)) {
-          setMeterSegs(t._meterSegs, meterPeak(t.trkMeter, buf));
-        }
+        if (!t.trkMeter) continue;
+        const vis = visible(t._meterSegs);
+        setTrkTap(t, vis);
+        if (vis) setMeterSegs(t._meterSegs, meterPeak(t.trkMeter, buf));
       }
-      if (masterMeter && visible(_masterMeterSegs)) {
-        setMeterSegs(_masterMeterSegs, meterPeak(masterMeter, buf));
+      if (masterMeter) {
+        const mvis = visible(_masterMeterSegs);
+        if (_masterMeterTapOn !== mvis && masterOut) {
+          try { mvis ? masterOut.connect(masterMeter) : masterOut.disconnect(masterMeter); } catch (e) {}
+          _masterMeterTapOn = mvis;
+        }
+        if (mvis) setMeterSegs(_masterMeterSegs, meterPeak(masterMeter, buf));
       }
     };
     requestAnimationFrame(loop);
