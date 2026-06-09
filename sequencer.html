@@ -3696,12 +3696,35 @@
       track._lfoApplied[key] = val;
     }
   }
+  // True when any track has a per-track modulation LFO actually doing work.
+  // Lets modTick skip the whole per-track sweep when nothing is modulating
+  // (the common case) — big battery saving on mobile, where an idle 60 fps
+  // loop keeps the CPU awake for no reason.
+  function modActive() {
+    for (const t of tracks) {
+      const ls = t.lfos;
+      if (!ls) continue;
+      for (let i = 0; i < ls.length; i++) {
+        const L = ls[i];
+        if (L && L.target !== 'none' && L.depth) return true;
+      }
+    }
+    return false;
+  }
+  let _modWasActive = false;
   function modTick() {
+    requestAnimationFrame(modTick);   // rAF auto-pauses when the page is hidden
     const now = performance.now();
-    const dt = Math.min(0.1, (now - _modLast) / 1000);
+    const dt = (now - _modLast) / 1000;
+    if (dt < 0.028) return;           // cap real work at ~30 fps
     _modLast = now;
-    for (const t of tracks) updateTrackLFOs(t, dt);
-    requestAnimationFrame(modTick);
+    const active = modActive();
+    // Run the sweep while active, plus exactly one more frame after it goes
+    // idle so disabled LFOs restore their base value; then stay quiet.
+    if (!active && !_modWasActive) return;
+    const d = Math.min(0.1, dt);
+    for (const t of tracks) updateTrackLFOs(t, d);
+    _modWasActive = active;
   }
   requestAnimationFrame(modTick);
 
@@ -12696,6 +12719,7 @@
 
   // ---------- meter loop (Mix tab + master strip) ----------
   let _meterLoopRunning = false;
+  let _meterLast = 0;
   let _masterMeterFill  = null;
   let _masterMeterSegs  = null;
   // Build a vertical segmented meter (N square cells stacked bottom-up).
@@ -12767,17 +12791,26 @@
     if (_meterLoopRunning) return;
     _meterLoopRunning = true;
     const buf = new Float32Array(128);
+    // A meter only needs polling when it's actually on screen. offsetParent
+    // is null whenever the element (or an ancestor) is display:none — e.g.
+    // the whole mixer in mobile Track mode — so we skip those analyser reads
+    // and DOM writes entirely. Reads are paint-safe (the 'lit' class only
+    // changes colour), so this doesn't thrash layout.
+    const visible = (segs) => segs && segs[0] && segs[0].offsetParent !== null;
     const loop = () => {
       if (!audioCtx) { _meterLoopRunning = false; return; }
+      requestAnimationFrame(loop);    // rAF auto-pauses when the page is hidden
+      const now = performance.now();
+      if (now - _meterLast < 32) return;   // ~30 fps is plenty for level meters
+      _meterLast = now;
       for (const t of tracks) {
-        if (t.trkMeter && t._meterSegs) {
+        if (t.trkMeter && visible(t._meterSegs)) {
           setMeterSegs(t._meterSegs, meterPeak(t.trkMeter, buf));
         }
       }
-      if (masterMeter && _masterMeterSegs) {
+      if (masterMeter && visible(_masterMeterSegs)) {
         setMeterSegs(_masterMeterSegs, meterPeak(masterMeter, buf));
       }
-      requestAnimationFrame(loop);
     };
     requestAnimationFrame(loop);
   }
