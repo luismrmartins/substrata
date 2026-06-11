@@ -4,6 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
 <title>substrata</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2032%2032'%3E%3Crect%20width='32'%20height='32'%20rx='7'%20fill='%232A2C2F'/%3E%3Crect%20x='6'%20y='7'%20width='20'%20height='3'%20rx='1.5'%20fill='%23FDFCF4'/%3E%3Crect%20x='9'%20y='12'%20width='14'%20height='3'%20rx='1.5'%20fill='%23FDFCF4'/%3E%3Crect%20x='6'%20y='17'%20width='20'%20height='3'%20rx='1.5'%20fill='%238B5CF6'/%3E%3Crect%20x='11'%20y='22'%20width='10'%20height='3'%20rx='1.5'%20fill='%23FDFCF4'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,400&family=DM+Mono:wght@300;400;500&display=swap" rel="stylesheet">
@@ -2236,6 +2237,34 @@
     border-color: var(--accent);
   }
   .lane-cell.accent.inactive { color: transparent; background: transparent; }
+  /* Probability lane — like vel/pan but tinted, and faded when full (100%)
+     so a row of "always" steps doesn't shout for attention. */
+  .lane-cell.prob .bar {
+    bottom: 0;
+    background: color-mix(in srgb, var(--accent) 70%, var(--text));
+  }
+  .lane-cell.prob.full .bar { opacity: 0.18; }
+  /* Condition lane — click-to-cycle text cell showing the X:Y ratio. */
+  .lane-cell.cond {
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 8px;
+    font-weight: 700;
+    line-height: 1;
+    letter-spacing: -0.5px;
+    color: var(--muted);
+    opacity: 0.5;
+  }
+  .lane-cell.cond:hover { opacity: 0.9; }
+  .lane-cell.cond.set {
+    color: var(--accent);
+    opacity: 1;
+    background: color-mix(in srgb, var(--accent) 18%, transparent);
+    border-color: var(--accent);
+  }
+  .lane-cell.cond.inactive { color: transparent; background: transparent; }
   .track:not(.expanded) .lane-cell { display: none; }
 
   .step-mini {
@@ -3597,6 +3626,10 @@
     { key: 'tune',       label: 'tune',    mode: 'add',   amt: 12,   min: -24,  max: 24 },
     { key: 'volume',     label: 'volume',  mode: 'node',  amt: 0.4,  min: 0,    max: 1.2, node: 'vol' },
     { key: 'pan',        label: 'pan',     mode: 'node',  amt: 1,    min: -1,   max: 1,   node: 'pan' },
+    // Morph drives the A/B/C morph position (0..2). Sweeping it crossfades
+    // the whole patch between snapshots; written through applyMorph so the
+    // audio + channel params follow. Only offered once snapshots exist.
+    { key: 'morph',      label: 'morph',   mode: 'morph', amt: 1,    min: 0,    max: 2 },
   ];
   const LFO_TARGET_MAP = {};
   LFO_TARGETS.forEach(d => { LFO_TARGET_MAP[d.key] = d; });
@@ -3608,6 +3641,12 @@
       if (d.key === 'none') return true;
       if (d.mode === 'node') return true;
       if (d.key === 'pitch') return typeof track.root === 'number';
+      // Morph is only useful with at least two snapshots to crossfade between.
+      if (d.key === 'morph') {
+        const ms = track.morphStates;
+        if (!ms) return false;
+        return (!!ms.A + !!ms.B + !!ms.C) >= 2;
+      }
       return typeof track[d.key] === 'number';
     }).map(d => d.key);
   }
@@ -3623,10 +3662,12 @@
 
   function lfoReadRaw(track, def) {
     if (def.mode === 'node') return def.node === 'pan' ? (track.pan || 0) : track.volume;
+    if (def.key === 'morph') return track.morphPos || 0;
     if (def.key === 'pitch') return track.root;
     return track[def.key];
   }
   function lfoWriteRaw(track, def, val) {
+    if (def.key === 'morph') { applyMorph(track, val, true); return; }
     if (def.mode === 'node') {
       const ap = def.node === 'pan' ? (track.trkPanNode && track.trkPanNode.pan)
                                     : (track.volNode && track.volNode.gain);
@@ -3661,11 +3702,24 @@
       if (!L || L.target === 'none' || !L.depth) continue;
       const def = LFO_TARGET_MAP[L.target];
       if (!def || def.key === 'none') continue;
-      let ph = (track._lfoPhase[i] + dt * (L.rate || 0)) % 1;
+      const adv = track._lfoPhase[i] + dt * (L.rate || 0);
+      let ph = adv % 1;
       if (ph < 0) ph += 1;
       track._lfoPhase[i] = ph;
       active[L.target] = true;
-      offsets[L.target] = (offsets[L.target] || 0) + lfoWave(L.shape, ph) * L.depth;
+      let w;
+      if (L.shape === 'random') {
+        // Sample & hold: latch a fresh random value each time the phase wraps
+        // (i.e. once per LFO cycle), giving the classic stepped random LFO.
+        if (!track._lfoRand) track._lfoRand = [];
+        if (adv >= 1 || track._lfoRand[i] === undefined) {
+          track._lfoRand[i] = Math.random() * 2 - 1;
+        }
+        w = track._lfoRand[i];
+      } else {
+        w = lfoWave(L.shape, ph);
+      }
+      offsets[L.target] = (offsets[L.target] || 0) + w * L.depth;
     }
 
     // Restore targets no longer modulated back to their stored base.
@@ -10591,7 +10645,7 @@
         selectField('Tgt', lfoTargets, L.target, v => { L.target = v; }),
         knob('Rate', 0.02, 20, 0.02, L.rate, v => L.rate = v, v => v.toFixed(2)),
         knob('Int', 0, 1, 0.01, L.depth, v => L.depth = v, v => v.toFixed(2)),
-        selectField('Shp', ['sine','triangle','sawtooth','square'], L.shape, v => L.shape = v),
+        selectField('Shp', ['sine','triangle','sawtooth','square','random'], L.shape, v => L.shape = v),
       ));
     }
   }
@@ -10614,7 +10668,7 @@
       renderStep(cell, track, i);
 
       // forward refs so the click handler can refresh the lanes when a step is toggled off
-      let velRef = null, panRef = null, lenRef = null, accRef = null;
+      let velRef = null, panRef = null, lenRef = null, accRef = null, probRef = null, condRef = null;
 
       cell.addEventListener('click', (e) => {
         if ((track.kind === 'bass' || track.kind === 'lead' || track.kind === 'sh101' || track.kind === 'juno' || track.kind === 'cs80') && e.shiftKey) {
@@ -10630,6 +10684,8 @@
         if (panRef) renderLane(panRef, track, i, 'pan');
         if (lenRef) renderLane(lenRef, track, i, 'length');
         if (accRef) renderAccent(accRef, track, i);
+        if (probRef) renderLane(probRef, track, i, 'prob');
+        if (condRef) renderCond(condRef, track, i);
       });
 
       if (track.kind === 'bass' || track.kind === 'lead' || track.kind === 'sh101' || track.kind === 'juno' || track.kind === 'cs80' || track.kind === 'granular' || track.kind === 'mellotron') {
@@ -10794,6 +10850,30 @@
       col.appendChild(acc);
       accRef = acc;
 
+      // Probability lane — drag a vertical bar to set the % chance the step
+      // fires (100% = always). Re-rolled every loop pass in the scheduler.
+      const prob = el('div', 'lane-cell prob');
+      const probBar = el('div', 'bar'); prob.appendChild(probBar);
+      prob.title = 'probability — drag down to make this step fire less often';
+      renderLane(prob, track, i, 'prob');
+      attachLaneDrag(prob, track, i, 'prob');
+      col.appendChild(prob);
+      probRef = prob;
+
+      // Condition lane — click to cycle the X:Y loop ratio (∞ = every loop).
+      const cond = el('div', 'lane-cell cond');
+      cond.title = 'trig condition — X:Y plays on the Xth of every Y loops (∞ = always)';
+      renderCond(cond, track, i);
+      cond.addEventListener('click', () => {
+        const entry = track.pattern[i];
+        if (!entry) return;
+        const cur = STEP_CONDS.indexOf(entry.cond || 'always');
+        entry.cond = STEP_CONDS[(cur + 1) % STEP_CONDS.length];
+        renderCond(cond, track, i);
+      });
+      col.appendChild(cond);
+      condRef = cond;
+
       track.stepsEl.appendChild(col);
     }
   }
@@ -10857,7 +10937,20 @@
       const v = entry.length ?? 1.0;
       bar.style.top = ''; bar.style.bottom = '0';
       bar.style.height = Math.min(100, (v / 3) * 100) + '%';
+    } else if (kind === 'prob') {
+      // 0..100% chance, full bar = always. Dimmed when full so it doesn't
+      // read like an active vel bar in the lane stack.
+      const v = entry.prob ?? 100;
+      bar.style.top = ''; bar.style.bottom = '0';
+      bar.style.height = v + '%';
+      cellEl.classList.toggle('full', v >= 100);
     }
+  }
+  function renderCond(cellEl, track, i) {
+    const entry = track.pattern[i];
+    cellEl.textContent = entry ? condLabel(entry.cond) : '';
+    cellEl.classList.toggle('inactive', !entry);
+    cellEl.classList.toggle('set', !!(entry && entry.cond && entry.cond !== 'always'));
   }
   function renderAccent(cellEl, track, i) {
     const entry = track.pattern[i];
@@ -10872,9 +10965,10 @@
       const update = (y) => {
         const t = clamp((rect.bottom - y) / rect.height, 0, 1);
         let val;
-        if (kind === 'vel')         val = t;          // 0..1
-        else if (kind === 'pan')    val = t * 2 - 1;  // -1..1
-        else if (kind === 'length') val = t * 3;      // 0..3
+        if (kind === 'vel')         val = t;                 // 0..1
+        else if (kind === 'pan')    val = t * 2 - 1;         // -1..1
+        else if (kind === 'length') val = t * 3;             // 0..3
+        else if (kind === 'prob')   val = Math.round(t * 100); // 0..100
         else                        val = t;
         track.pattern[i][kind] = val;
         renderLane(cellEl, track, i, kind);
@@ -11683,6 +11777,30 @@
   // velocity. +60% (~+4 dB) lets accents punch above the rest of the pattern;
   // clamped below so even a full-velocity accented step can't run away.
   const ACCENT_BOOST = 0.6;
+  // ---------- Per-step trig conditions (Digitakt-style) ----------
+  // Two independent gates a step can carry, both re-evaluated every loop pass:
+  //   • prob  — a 0..100 chance the step fires at all (random % of the time).
+  //   • cond  — an "X:Y" loop ratio: the step only fires on the Xth pass of
+  //             every Y passes through the pattern. With a 16-step (1-bar)
+  //             pattern, "1:4" therefore plays once every 4 bars, etc.
+  // Absent fields mean "always", so old patterns are unaffected.
+  const STEP_CONDS = ['always','1:2','2:2','1:3','2:3','3:3','1:4','2:4','3:4','4:4','1:8','2:8','4:8','8:8'];
+  function condLabel(cond) { return (!cond || cond === 'always') ? '∞' : cond; }
+  function stepTriggers(track, entry) {
+    const cond = entry.cond;
+    if (cond && cond !== 'always') {
+      const c = cond.split(':');
+      const x = +c[0], y = +c[1];
+      if (y > 0) {
+        const loopNum = Math.floor(track.nextStep / track.pattern.length);
+        if ((loopNum % y) !== (x - 1)) return false;
+      }
+    }
+    const p = entry.prob;
+    if (p != null && p < 100 && Math.random() * 100 >= p) return false;
+    return true;
+  }
+
   function scheduler() {
     const horizon = audioCtx.currentTime + SCHEDULE_AHEAD;
     const sDur = stepDuration();
@@ -11708,7 +11826,7 @@
         }
         const entry = t.pattern[idx];
         const audible = t.armed && !t.mute && (!anySolo || t.solo);
-        if (entry && audible) {
+        if (entry && audible && stepTriggers(t, entry)) {
           const vel = entry.vel ?? 1;
           const pan = entry.pan ?? 0;
           // Accent rides on top of the step's velocity so emphasised steps
@@ -12259,7 +12377,7 @@
     return merged;
   }
 
-  function applyMorph(track, pos) {
+  function applyMorph(track, pos, skipKnobRefresh) {
     track.morphPos = pos;
     const ms = track.morphStates;
     if (!ms) return;
@@ -12301,8 +12419,10 @@
     if (track.trkLfo && merged.trkLfoRate !== undefined) track.trkLfo.frequency.setTargetAtTime(merged.trkLfoRate, ct, ramp);
     // Live-update every slider in the current Track-tab view that's bound
     // to one of the morphed properties — so the user sees knobs move with
-    // the morph slider, not just hear the sound change.
-    refreshMorphableKnobs(track, merged);
+    // the morph slider, not just hear the sound change. Skipped when an LFO
+    // is driving the morph control-rate: the per-frame querySelectorAll would
+    // be far too costly, and the audio still follows.
+    if (!skipKnobRefresh) refreshMorphableKnobs(track, merged);
   }
 
   function refreshMorphableKnobs(track, mergedParams) {
@@ -13219,7 +13339,7 @@
       for (const key in t._lfoBase) {
         const def = LFO_TARGET_MAP[key];
         if (!def || def.mode === 'node') continue;
-        const prop = def.key === 'pitch' ? 'root' : def.key;
+        const prop = def.key === 'pitch' ? 'root' : def.key === 'morph' ? 'morphPos' : def.key;
         if (prop in out) out[prop] = t._lfoBase[key];
       }
     }
