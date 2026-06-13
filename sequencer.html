@@ -2076,6 +2076,7 @@
   /* Hide live-mode-irrelevant per-channel buttons (duplicate, group, delete) */
   body.mode-live .toggle.dup,
   body.mode-live .toggle.grp,
+  body.mode-live .toggle.art,
   body.mode-live .toggle.rmv { display: none !important; }
   /* Hide the deck-level "Mute all / Unmute all" — per-channel mutes do it better */
   body.mode-live #live-mute-A,
@@ -2495,6 +2496,33 @@
   }
   .toggle:hover { border-color: var(--text); }
   .toggle.on { background: var(--text); color: var(--bg); border-color: var(--text); }
+  .toggle.art { font-size: 11px; }
+
+  /* Generated-artwork modal */
+  .art-overlay {
+    position: fixed; inset: 0; z-index: 9999;
+    display: flex; align-items: center; justify-content: center;
+    padding: 24px;
+    background: rgba(0,0,0,0.6);
+    -webkit-backdrop-filter: blur(4px); backdrop-filter: blur(4px);
+  }
+  .art-box {
+    display: flex; flex-direction: column; gap: 12px;
+    max-width: min(92vw, 900px);
+    background: var(--bg);
+    border: 1px solid var(--cell-border);
+    padding: 16px;
+    box-shadow: 0 24px 70px rgba(0,0,0,0.45);
+  }
+  .art-title {
+    font-size: 11px; letter-spacing: 0.6px; text-transform: uppercase;
+    color: var(--muted);
+  }
+  .art-canvas {
+    width: 100%; height: auto; display: block;
+    border: 1px solid var(--cell-border);
+  }
+  .art-controls { display: flex; gap: 8px; flex-wrap: wrap; }
 
   .mic-control {
     display: flex;
@@ -9528,6 +9556,180 @@
   }
 
   // ---------- track UI ----------
+  // ---------- Generative track artwork ----------
+  // A soft horizontal colour-field — hazy gradient bands with a luminous
+  // "horizon" glow, in the spirit of Rothko / backlit colour-field painting.
+  // The composition is seeded from the track's identity (name + kind) so a
+  // track always reads as "itself", while its parameters (pattern density,
+  // cutoff, resonance, volume, pan) steer the palette and structure. A
+  // per-open random seed lets the user regenerate variations.
+  const ART_KIND_HUE = {
+    drum: 8, bass: 228, sh101: 262, juno: 282, cs80: 300, lead: 190,
+    chord: 142, mellotron: 34, granular: 326, sampler: 168, mic: 208,
+  };
+  function artHash(s) {
+    let h = 2166136261; s = String(s);
+    for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); }
+    return h >>> 0;
+  }
+  function artRng(seed) {
+    let a = seed >>> 0;
+    return function () {
+      a = a + 0x6D2B79F5 | 0;
+      let t = Math.imul(a ^ a >>> 15, 1 | a);
+      t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+      return ((t ^ t >>> 14) >>> 0) / 4294967296;
+    };
+  }
+  function trackArtParams(track, seed) {
+    const idHash = artHash((track.name || '') + '|' + (track.kind || ''));
+    const rng = artRng((idHash ^ Math.imul(seed + 1, 2654435761)) >>> 0);
+    const pat = Array.isArray(track.pattern) ? track.pattern : [];
+    const total = pat.length || 16;
+    const density = total ? pat.filter(Boolean).length / total : 0.3;
+    const cutoff = clamp((track.cutoff != null ? track.cutoff : 9000) / 18000, 0, 1);
+    const reso   = clamp((track.reso   != null ? track.reso   : 4) / 25, 0, 1);
+    const vol    = clamp((track.volume != null ? track.volume : 0.8) / 1.2, 0, 1);
+    const pan    = clamp(track.pan || 0, -1, 1);
+    const baseHue = (((ART_KIND_HUE[track.kind] != null ? ART_KIND_HUE[track.kind] : idHash % 360)
+                      + (rng() * 36 - 18) + (idHash % 20)) % 360 + 360) % 360;
+    return { rng, density, cutoff, reso, vol, pan, baseHue };
+  }
+  function generateTrackArtwork(canvas, track, seed) {
+    const W = canvas.width, H = canvas.height;
+    const ctx = canvas.getContext('2d');
+    const P = trackArtParams(track, seed);
+    const rng = P.rng, hue = P.baseHue;
+    const hsl  = (h, s, l)    => 'hsl('  + (((h % 360) + 360) % 360) + ',' + s + '%,' + l + '%)';
+    const hsla = (h, s, l, a) => 'hsla(' + (((h % 360) + 360) % 360) + ',' + s + '%,' + l + '%,' + a + ')';
+
+    const sat = Math.round(50 + P.reso * 42);
+    const fieldL = Math.round(36 + P.cutoff * 20);
+
+    ctx.clearRect(0, 0, W, H);
+    ctx.filter = 'none';
+    // Vertical base field: deep at the top, saturated mid, lifting to light.
+    const bg = ctx.createLinearGradient(0, 0, 0, H);
+    bg.addColorStop(0,    hsl(hue - 8,  Math.round(sat * 0.75), Math.round(8 + P.vol * 8)));
+    bg.addColorStop(0.5,  hsl(hue,      sat,                    fieldL));
+    bg.addColorStop(1,    hsl(hue + 12, Math.round(sat * 0.6),  Math.round(66 + P.cutoff * 18)));
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, W, H);
+
+    // Faint vertical sheen (the backlit, slightly-streaked quality).
+    ctx.save();
+    ctx.filter = 'blur(' + Math.round(W * 0.03) + 'px)';
+    const vx = W * (0.5 + P.pan * 0.35);
+    const vsheen = ctx.createLinearGradient(vx - W * 0.4, 0, vx + W * 0.4, 0);
+    vsheen.addColorStop(0,   hsla(hue, sat, 90, 0));
+    vsheen.addColorStop(0.5, hsla(hue, Math.round(sat * 0.5), 88, 0.10 + P.vol * 0.10));
+    vsheen.addColorStop(1,   hsla(hue, sat, 90, 0));
+    ctx.fillStyle = vsheen;
+    ctx.fillRect(0, 0, W, H);
+    ctx.restore();
+
+    // Soft horizontal bands — count scales with pattern density.
+    const bands = 2 + Math.round(P.density * 4);
+    ctx.save();
+    for (let i = 0; i < bands; i++) {
+      const cy    = H * (0.12 + rng() * 0.76);
+      const bh    = H * (0.05 + rng() * 0.20);
+      const bhue  = hue + (rng() * 56 - 28);
+      const bl    = Math.round(28 + rng() * 56);
+      const alpha = (0.16 + rng() * 0.32).toFixed(3);
+      ctx.filter = 'blur(' + Math.round(bh * (0.5 + rng() * 0.7)) + 'px)';
+      const g = ctx.createLinearGradient(0, cy - bh, 0, cy + bh);
+      g.addColorStop(0,   hsla(bhue, sat, bl, 0));
+      g.addColorStop(0.5, hsla(bhue, sat, bl, alpha));
+      g.addColorStop(1,   hsla(bhue, sat, bl, 0));
+      ctx.fillStyle = g;
+      ctx.fillRect(0, cy - bh * 1.6, W, bh * 3.2);
+    }
+    ctx.restore();
+
+    // Luminous "horizon" glow — the signature bright stripe. Its height grows
+    // with resonance; its position rides cutoff (brighter = higher).
+    const glowY = H * (0.62 - P.cutoff * 0.34 + (rng() * 0.08 - 0.04));
+    const glowH = H * (0.035 + P.reso * 0.10);
+    ctx.save();
+    ctx.filter = 'blur(' + Math.round(glowH * 0.9) + 'px)';
+    const gg = ctx.createLinearGradient(0, glowY - glowH * 2.5, 0, glowY + glowH * 2.5);
+    gg.addColorStop(0,   hsla(hue + 6, Math.round(sat * 0.4), 94, 0));
+    gg.addColorStop(0.5, hsla(hue + 6, Math.round(sat * 0.35), 95, 0.82));
+    gg.addColorStop(1,   hsla(hue + 6, Math.round(sat * 0.4), 94, 0));
+    ctx.fillStyle = gg;
+    ctx.fillRect(0, glowY - glowH * 3, W, glowH * 6);
+    ctx.restore();
+
+    // Film grain via a small noise tile scaled up in 'overlay' blend.
+    const nW = 320, nH = Math.max(1, Math.round(nW * H / W));
+    const noise = document.createElement('canvas');
+    noise.width = nW; noise.height = nH;
+    const nctx = noise.getContext('2d');
+    const id = nctx.createImageData(nW, nH);
+    for (let i = 0; i < id.data.length; i += 4) {
+      const v = 190 + Math.floor(rng() * 65);
+      id.data[i] = id.data[i + 1] = id.data[i + 2] = v;
+      id.data[i + 3] = 255;
+    }
+    nctx.putImageData(id, 0, 0);
+    ctx.save();
+    ctx.filter = 'none';
+    ctx.globalAlpha = 0.045 + P.reso * 0.05;
+    ctx.globalCompositeOperation = 'overlay';
+    ctx.drawImage(noise, 0, 0, W, H);
+    ctx.restore();
+
+    // Gentle vignette to seat the field.
+    ctx.save();
+    ctx.filter = 'none';
+    const vg = ctx.createRadialGradient(W / 2, H / 2, H * 0.3, W / 2, H / 2, H * 0.95);
+    vg.addColorStop(0, 'rgba(0,0,0,0)');
+    vg.addColorStop(1, 'rgba(0,0,0,0.26)');
+    ctx.fillStyle = vg;
+    ctx.fillRect(0, 0, W, H);
+    ctx.restore();
+  }
+  function openArtworkModal(track) {
+    let seed = (Math.random() * 1e9) | 0;
+    const overlay = el('div', 'art-overlay');
+    const box = el('div', 'art-box');
+    const title = el('div', 'art-title', (track.name || 'track') + ' — generated artwork');
+    const canvas = el('canvas', 'art-canvas');
+    canvas.width = 1200; canvas.height = 800;
+    const controls = el('div', 'art-controls');
+    const regenBtn = el('button', 'mic-btn', '↻ Regenerate');
+    const dlBtn    = el('button', 'mic-btn', '⬇ Download PNG');
+    const closeBtn = el('button', 'mic-btn', '✕ Close');
+    const render = () => generateTrackArtwork(canvas, track, seed);
+    render();
+    regenBtn.addEventListener('click', () => { seed = (Math.random() * 1e9) | 0; render(); });
+    dlBtn.addEventListener('click', () => {
+      canvas.toBlob((blob) => {
+        if (!blob) return;
+        const url = URL.createObjectURL(blob);
+        const a = el('a');
+        a.href = url;
+        a.download = (track.name || 'track').replace(/\s+/g, '_') + '_artwork.png';
+        a.click();
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+      }, 'image/png');
+    });
+    const close = () => { overlay.remove(); document.removeEventListener('keydown', onKey); };
+    function onKey(e) { if (e.key === 'Escape') close(); }
+    closeBtn.addEventListener('click', close);
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+    document.addEventListener('keydown', onKey);
+    controls.appendChild(regenBtn);
+    controls.appendChild(dlBtn);
+    controls.appendChild(closeBtn);
+    box.appendChild(title);
+    box.appendChild(canvas);
+    box.appendChild(controls);
+    overlay.appendChild(box);
+    document.body.appendChild(overlay);
+  }
+
   function buildTrack(track) {
     const wrap = el('div', 'track');
     if (track.expanded) wrap.classList.add('expanded');
@@ -9563,6 +9765,7 @@
     const nrBtn = el('button', 'toggle nudge nudge-fwd',  '►');
     const dBtn  = el('button', 'toggle dup',  'D');
     const gBtn  = el('button', 'toggle grp',  'G' + (track.group || 0));
+    const artBtn = el('button', 'toggle art', '▨');
     const xBtn  = el('button', 'toggle rmv',  '×');
     aBtn.title = 'armed (will play)';
     mBtn.title = 'mute'; sBtn.title = 'solo';
@@ -9572,7 +9775,9 @@
     nrBtn.title = 'nudge pattern later by one step';
     dBtn.title = 'duplicate track';
     gBtn.title = 'mute/solo group (0 = none, 1-8 link tracks)';
+    artBtn.title = 'generate artwork from this track';
     xBtn.title = 'remove track';
+    artBtn.addEventListener('click', (e) => { e.stopPropagation(); openArtworkModal(track); });
     track._mBtn = mBtn;
     track._aBtn = aBtn;
     track._sBtn = sBtn;
@@ -9646,6 +9851,7 @@
     togs.appendChild(nrBtn);
     togs.appendChild(dBtn);
     togs.appendChild(gBtn);
+    togs.appendChild(artBtn);
     togs.appendChild(xBtn);
     meta.appendChild(togs);
 
