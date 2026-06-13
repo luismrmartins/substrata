@@ -9668,7 +9668,7 @@
       const g = bctx.createLinearGradient(0, ci.off, 0, H + ci.off);
       for (let i = 0; i < K; i++) {
         const c = (i + 0.5) * stepN;
-        const pw = stepN * 0.34;
+        const pw = stepN * 0.44;
         const jit = rng() * stepN * 0.2 - stepN * 0.1;
         const col = ci.ct[i][0] > 0 ? acc(ci.ct[i][0], ci.ct[i][1]) : gray(ci.ct[i][1]);
         g.addColorStop(clamp(c - pw + jit, 0, 1), col);
@@ -9678,21 +9678,21 @@
       bctx.fillRect(ci.x0, 0, ci.x1 - ci.x0, H);
       // white "horizon" glow only where this column actually has a white band
       if (ci.whiteAt >= 0) {
-        const gy = ci.off + (ci.whiteAt + 0.5) * stepN * H, gh = H * 0.05;
+        const gy = ci.off + (ci.whiteAt + 0.5) * stepN * H, gh = H * 0.035;
         bctx.save();
         bctx.filter = 'blur(' + Math.round(gh) + 'px)';
         const gg = bctx.createLinearGradient(0, gy - gh * 2.5, 0, gy + gh * 2.5);
         gg.addColorStop(0, grayA(99, 0));
-        gg.addColorStop(0.5, grayA(99, 0.5));
+        gg.addColorStop(0.5, grayA(99, 0.4));
         gg.addColorStop(1, grayA(99, 0));
         bctx.fillStyle = gg;
         bctx.fillRect(ci.x0, gy - gh * 3, ci.x1 - ci.x0, gh * 6);
         bctx.restore();
       }
     }
-    // composite the band layer with a soft blur so the column seams melt
+    // composite the band layer with a light blur so the column seams melt
     ctx.save();
-    ctx.filter = 'blur(' + Math.round(W * 0.013) + 'px)';
+    ctx.filter = 'blur(' + Math.round(W * 0.005) + 'px)';
     ctx.drawImage(band, 0, 0);
     ctx.restore();
 
