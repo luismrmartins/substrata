@@ -2076,7 +2076,6 @@
   /* Hide live-mode-irrelevant per-channel buttons (duplicate, group, delete) */
   body.mode-live .toggle.dup,
   body.mode-live .toggle.grp,
-  body.mode-live .toggle.art,
   body.mode-live .toggle.rmv { display: none !important; }
   /* Hide the deck-level "Mute all / Unmute all" — per-channel mutes do it better */
   body.mode-live #live-mute-A,
@@ -2496,7 +2495,6 @@
   }
   .toggle:hover { border-color: var(--text); }
   .toggle.on { background: var(--text); color: var(--bg); border-color: var(--text); }
-  .toggle.art { font-size: 11px; }
 
   /* Generated-artwork modal */
   .art-overlay {
@@ -3168,6 +3166,7 @@
           <span id="folder-name" class="folder-name">no folder</span>
           <button id="save" class="small" title="Save (shift-click to rename)">Save</button>
           <button id="load" class="small">Load</button>
+          <button id="artwork" class="small" title="generate artwork from this song">▨ Art</button>
           <span id="project-name" class="folder-name"></span>
           <button id="theme" class="small" title="toggle dark/light">☼</button>
           <button id="fullscreen" class="small" title="toggle full screen">⛶</button>
@@ -9556,17 +9555,14 @@
   }
 
   // ---------- track UI ----------
-  // ---------- Generative track artwork ----------
-  // A soft horizontal colour-field — hazy gradient bands with a luminous
-  // "horizon" glow, in the spirit of Rothko / backlit colour-field painting.
-  // The composition is seeded from the track's identity (name + kind) so a
-  // track always reads as "itself", while its parameters (pattern density,
-  // cutoff, resonance, volume, pan) steer the palette and structure. A
-  // per-open random seed lets the user regenerate variations.
-  const ART_KIND_HUE = {
-    drum: 8, bass: 228, sh101: 262, juno: 282, cs80: 300, lead: 190,
-    chord: 142, mellotron: 34, granular: 326, sampler: 168, mic: 208,
-  };
+  // ---------- Generative song artwork ----------
+  // One artwork for the whole song: stacked soft horizontal bands in the
+  // spirit of Rothko / backlit colour-field painting. The palette is strictly
+  // black + white + greys plus a SINGLE accent colour. The composition is
+  // seeded from the song (every track's kind+name and the BPM) so a song reads
+  // as "itself"; pattern density and track count steer the band count, and the
+  // accent hue is derived from the song. A per-open random seed regenerates
+  // variations.
   function artHash(s) {
     let h = 2166136261; s = String(s);
     for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); }
@@ -9581,87 +9577,114 @@
       return ((t ^ t >>> 14) >>> 0) / 4294967296;
     };
   }
-  function trackArtParams(track, seed) {
-    const idHash = artHash((track.name || '') + '|' + (track.kind || ''));
+  function songArtParams(seed) {
+    const sig = tracks.map(t => (t.kind || '') + ':' + (t.name || '')).join('|');
+    const bpm = parseFloat(bpmInput && bpmInput.value) || 120;
+    const idHash = artHash(sig + '|' + Math.round(bpm));
     const rng = artRng((idHash ^ Math.imul(seed + 1, 2654435761)) >>> 0);
-    const pat = Array.isArray(track.pattern) ? track.pattern : [];
-    const total = pat.length || 16;
-    const density = total ? pat.filter(Boolean).length / total : 0.3;
-    const cutoff = clamp((track.cutoff != null ? track.cutoff : 9000) / 18000, 0, 1);
-    const reso   = clamp((track.reso   != null ? track.reso   : 4) / 25, 0, 1);
-    const vol    = clamp((track.volume != null ? track.volume : 0.8) / 1.2, 0, 1);
-    const pan    = clamp(track.pan || 0, -1, 1);
-    const baseHue = (((ART_KIND_HUE[track.kind] != null ? ART_KIND_HUE[track.kind] : idHash % 360)
-                      + (rng() * 36 - 18) + (idHash % 20)) % 360 + 360) % 360;
-    return { rng, density, cutoff, reso, vol, pan, baseHue };
+    let active = 0, total = 0;
+    for (const t of tracks) {
+      if (Array.isArray(t.pattern) && t.pattern.length) {
+        total += t.pattern.length;
+        active += t.pattern.filter(Boolean).length;
+      }
+    }
+    const density = total ? active / total : 0.35;
+    const nTracks = tracks.filter(t => t.kind !== 'mic').length;
+    const accentHue = idHash % 360;   // the one additional colour
+    return { rng, density, nTracks, accentHue };
   }
-  function generateTrackArtwork(canvas, track, seed) {
+  function generateSongArtwork(canvas, seed) {
     const W = canvas.width, H = canvas.height;
     const ctx = canvas.getContext('2d');
-    const P = trackArtParams(track, seed);
-    const rng = P.rng, hue = P.baseHue;
-    const hsl  = (h, s, l)    => 'hsl('  + (((h % 360) + 360) % 360) + ',' + s + '%,' + l + '%)';
-    const hsla = (h, s, l, a) => 'hsla(' + (((h % 360) + 360) % 360) + ',' + s + '%,' + l + '%,' + a + ')';
-
-    const sat = Math.round(50 + P.reso * 42);
-    const fieldL = Math.round(36 + P.cutoff * 20);
+    const P = songArtParams(seed);
+    const rng = P.rng, hue = P.accentHue;
+    const gray  = (l)    => 'hsl(0,0%,' + l + '%)';
+    const grayA = (l, a) => 'hsla(0,0%,' + l + '%,' + a + ')';
+    const acc   = (s, l) => 'hsl(' + hue + ',' + s + '%,' + l + '%)';
+    const accA  = (s, l, a) => 'hsla(' + hue + ',' + s + '%,' + l + '%,' + a + ')';
 
     ctx.clearRect(0, 0, W, H);
     ctx.filter = 'none';
-    // Vertical base field: deep at the top, saturated mid, lifting to light.
-    const bg = ctx.createLinearGradient(0, 0, 0, H);
-    bg.addColorStop(0,    hsl(hue - 8,  Math.round(sat * 0.75), Math.round(8 + P.vol * 8)));
-    bg.addColorStop(0.5,  hsl(hue,      sat,                    fieldL));
-    bg.addColorStop(1,    hsl(hue + 12, Math.round(sat * 0.6),  Math.round(66 + P.cutoff * 18)));
-    ctx.fillStyle = bg;
+
+    // How many stacked bands — scales with how busy the song is.
+    const K = clamp(4 + Math.round(P.density * 3) + (P.nTracks > 6 ? 1 : 0), 4, 7);
+
+    // Assign each band a tone: mostly greyscale (with some near-black and
+    // near-white), the accent colour on at least one band, and one forced
+    // near-white band for the bright "horizon". A second accent band can
+    // appear when the song is busy. Greys use saturation 0 (s === 0 sentinel).
+    const accentIdx = Math.floor(rng() * K);
+    let whiteIdx = Math.floor(rng() * K);
+    if (whiteIdx === accentIdx) whiteIdx = (whiteIdx + 1) % K;
+    const tones = [];
+    for (let i = 0; i < K; i++) {
+      if (i === accentIdx) {
+        tones.push([Math.round(55 + rng() * 32), Math.round(40 + rng() * 24)]);
+      } else if (i === whiteIdx) {
+        tones.push([0, Math.round(90 + rng() * 8)]);
+      } else {
+        const r = rng();
+        const l = r < 0.18 ? Math.round(4 + rng() * 6)
+                : r < 0.34 ? Math.round(88 + rng() * 10)
+                : Math.round(18 + rng() * 64);
+        tones.push([0, l]);
+      }
+    }
+    if (P.density > 0.5 && rng() < 0.5) {
+      let j = Math.floor(rng() * K);
+      if (j !== accentIdx && j !== whiteIdx) tones[j] = [Math.round(50 + rng() * 30), Math.round(38 + rng() * 26)];
+    }
+
+    // Stacked bands via a single vertical gradient with flat plateaus — this
+    // reads as several distinct-but-soft horizontal bands.
+    const grad = ctx.createLinearGradient(0, 0, 0, H);
+    const stepN = 1 / K;
+    for (let i = 0; i < K; i++) {
+      const c = (i + 0.5) * stepN;
+      const pw = stepN * 0.34;
+      const jit = rng() * stepN * 0.2 - stepN * 0.1;
+      const s = tones[i][0], l = tones[i][1];
+      const col = s > 0 ? acc(s, l) : gray(l);
+      grad.addColorStop(clamp(c - pw + jit, 0, 1), col);
+      grad.addColorStop(clamp(c + pw + jit, 0, 1), col);
+    }
+    ctx.fillStyle = grad;
     ctx.fillRect(0, 0, W, H);
 
-    // Faint vertical sheen (the backlit, slightly-streaked quality).
+    // Extra hazy bands for depth — soft, mostly grey with occasional accent.
     ctx.save();
-    ctx.filter = 'blur(' + Math.round(W * 0.03) + 'px)';
-    const vx = W * (0.5 + P.pan * 0.35);
-    const vsheen = ctx.createLinearGradient(vx - W * 0.4, 0, vx + W * 0.4, 0);
-    vsheen.addColorStop(0,   hsla(hue, sat, 90, 0));
-    vsheen.addColorStop(0.5, hsla(hue, Math.round(sat * 0.5), 88, 0.10 + P.vol * 0.10));
-    vsheen.addColorStop(1,   hsla(hue, sat, 90, 0));
-    ctx.fillStyle = vsheen;
-    ctx.fillRect(0, 0, W, H);
-    ctx.restore();
-
-    // Soft horizontal bands — count scales with pattern density.
-    const bands = 2 + Math.round(P.density * 4);
-    ctx.save();
-    for (let i = 0; i < bands; i++) {
-      const cy    = H * (0.12 + rng() * 0.76);
-      const bh    = H * (0.05 + rng() * 0.20);
-      const bhue  = hue + (rng() * 56 - 28);
-      const bl    = Math.round(28 + rng() * 56);
-      const alpha = (0.16 + rng() * 0.32).toFixed(3);
-      ctx.filter = 'blur(' + Math.round(bh * (0.5 + rng() * 0.7)) + 'px)';
+    const extra = 2 + Math.round(P.density * 2);
+    for (let i = 0; i < extra; i++) {
+      const cy = H * (0.08 + rng() * 0.84);
+      const bh = H * (0.04 + rng() * 0.16);
+      const isAcc = rng() < 0.35;
+      const a = (0.10 + rng() * 0.20).toFixed(3);
+      const l = Math.round(rng() * 100);
+      ctx.filter = 'blur(' + Math.round(bh * (0.7 + rng() * 0.8)) + 'px)';
       const g = ctx.createLinearGradient(0, cy - bh, 0, cy + bh);
-      g.addColorStop(0,   hsla(bhue, sat, bl, 0));
-      g.addColorStop(0.5, hsla(bhue, sat, bl, alpha));
-      g.addColorStop(1,   hsla(bhue, sat, bl, 0));
+      const c0 = isAcc ? accA(Math.round(55 + rng() * 30), Math.round(45 + rng() * 20), 0)  : grayA(l, 0);
+      const c1 = isAcc ? accA(Math.round(55 + rng() * 30), Math.round(45 + rng() * 20), a)  : grayA(l, a);
+      g.addColorStop(0, c0); g.addColorStop(0.5, c1); g.addColorStop(1, c0);
       ctx.fillStyle = g;
       ctx.fillRect(0, cy - bh * 1.6, W, bh * 3.2);
     }
     ctx.restore();
 
-    // Luminous "horizon" glow — the signature bright stripe. Its height grows
-    // with resonance; its position rides cutoff (brighter = higher).
-    const glowY = H * (0.62 - P.cutoff * 0.34 + (rng() * 0.08 - 0.04));
-    const glowH = H * (0.035 + P.reso * 0.10);
+    // Luminous white glow on the bright band.
+    const glowY = H * ((whiteIdx + 0.5) / K);
+    const glowH = H * 0.05;
     ctx.save();
-    ctx.filter = 'blur(' + Math.round(glowH * 0.9) + 'px)';
+    ctx.filter = 'blur(' + Math.round(glowH) + 'px)';
     const gg = ctx.createLinearGradient(0, glowY - glowH * 2.5, 0, glowY + glowH * 2.5);
-    gg.addColorStop(0,   hsla(hue + 6, Math.round(sat * 0.4), 94, 0));
-    gg.addColorStop(0.5, hsla(hue + 6, Math.round(sat * 0.35), 95, 0.82));
-    gg.addColorStop(1,   hsla(hue + 6, Math.round(sat * 0.4), 94, 0));
+    gg.addColorStop(0, grayA(99, 0));
+    gg.addColorStop(0.5, grayA(99, 0.5));
+    gg.addColorStop(1, grayA(99, 0));
     ctx.fillStyle = gg;
     ctx.fillRect(0, glowY - glowH * 3, W, glowH * 6);
     ctx.restore();
 
-    // Film grain via a small noise tile scaled up in 'overlay' blend.
+    // Film grain via a small greyscale noise tile scaled up in 'overlay' blend.
     const nW = 320, nH = Math.max(1, Math.round(nW * H / W));
     const noise = document.createElement('canvas');
     noise.width = nW; noise.height = nH;
@@ -9675,7 +9698,7 @@
     nctx.putImageData(id, 0, 0);
     ctx.save();
     ctx.filter = 'none';
-    ctx.globalAlpha = 0.045 + P.reso * 0.05;
+    ctx.globalAlpha = 0.05;
     ctx.globalCompositeOperation = 'overlay';
     ctx.drawImage(noise, 0, 0, W, H);
     ctx.restore();
@@ -9690,18 +9713,19 @@
     ctx.fillRect(0, 0, W, H);
     ctx.restore();
   }
-  function openArtworkModal(track) {
+  function openArtworkModal() {
     let seed = (Math.random() * 1e9) | 0;
+    const songName = (document.getElementById('project-name') || {}).textContent || '';
     const overlay = el('div', 'art-overlay');
     const box = el('div', 'art-box');
-    const title = el('div', 'art-title', (track.name || 'track') + ' — generated artwork');
+    const title = el('div', 'art-title', (songName.trim() || 'song') + ' — generated artwork');
     const canvas = el('canvas', 'art-canvas');
     canvas.width = 1200; canvas.height = 800;
     const controls = el('div', 'art-controls');
     const regenBtn = el('button', 'mic-btn', '↻ Regenerate');
     const dlBtn    = el('button', 'mic-btn', '⬇ Download PNG');
     const closeBtn = el('button', 'mic-btn', '✕ Close');
-    const render = () => generateTrackArtwork(canvas, track, seed);
+    const render = () => generateSongArtwork(canvas, seed);
     render();
     regenBtn.addEventListener('click', () => { seed = (Math.random() * 1e9) | 0; render(); });
     dlBtn.addEventListener('click', () => {
@@ -9710,7 +9734,7 @@
         const url = URL.createObjectURL(blob);
         const a = el('a');
         a.href = url;
-        a.download = (track.name || 'track').replace(/\s+/g, '_') + '_artwork.png';
+        a.download = (songName.trim() || 'substrata-song').replace(/\s+/g, '_') + '_artwork.png';
         a.click();
         setTimeout(() => URL.revokeObjectURL(url), 1000);
       }, 'image/png');
@@ -9765,7 +9789,6 @@
     const nrBtn = el('button', 'toggle nudge nudge-fwd',  '►');
     const dBtn  = el('button', 'toggle dup',  'D');
     const gBtn  = el('button', 'toggle grp',  'G' + (track.group || 0));
-    const artBtn = el('button', 'toggle art', '▨');
     const xBtn  = el('button', 'toggle rmv',  '×');
     aBtn.title = 'armed (will play)';
     mBtn.title = 'mute'; sBtn.title = 'solo';
@@ -9775,9 +9798,7 @@
     nrBtn.title = 'nudge pattern later by one step';
     dBtn.title = 'duplicate track';
     gBtn.title = 'mute/solo group (0 = none, 1-8 link tracks)';
-    artBtn.title = 'generate artwork from this track';
     xBtn.title = 'remove track';
-    artBtn.addEventListener('click', (e) => { e.stopPropagation(); openArtworkModal(track); });
     track._mBtn = mBtn;
     track._aBtn = aBtn;
     track._sBtn = sBtn;
@@ -9851,7 +9872,6 @@
     togs.appendChild(nrBtn);
     togs.appendChild(dBtn);
     togs.appendChild(gBtn);
-    togs.appendChild(artBtn);
     togs.appendChild(xBtn);
     meta.appendChild(togs);
 
@@ -14559,6 +14579,7 @@
   }
   document.getElementById('save').addEventListener('click', (e) => saveProject(e.shiftKey));
   document.getElementById('load').addEventListener('click', openLoadDialog);
+  document.getElementById('artwork').addEventListener('click', () => openArtworkModal());
 
   // ---------- recording (master output → WAV) ----------
   // Tap the post-master signal with a ScriptProcessor, accumulate stereo
