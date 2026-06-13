@@ -3622,6 +3622,7 @@
     { key: 'reso',       label: 'reso',    mode: 'add',   amt: 8,    min: 0.1,  max: 25 },
     { key: 'pitch',      label: 'pitch',   mode: 'pitch', amt: 7 },
     { key: 'fEnvAmt',    label: 'filtEnv', mode: 'add',   amt: 0.5,  min: 0,    max: 1 },
+    { key: 'fDecay',     label: 'fDecay',  mode: 'add',   amt: 0.5,  min: 0.01, max: 2 },
     { key: 'pulseWidth', label: 'pulseW',  mode: 'add',   amt: 0.45, min: 0.05, max: 0.95 },
     { key: 'tune',       label: 'tune',    mode: 'add',   amt: 12,   min: -24,  max: 24 },
     { key: 'volume',     label: 'volume',  mode: 'node',  amt: 0.4,  min: 0,    max: 1.2, node: 'vol' },
@@ -4633,8 +4634,14 @@
     src.playbackRate.value = rate;
     if (tr.loop) {
       src.loop = true;
-      src.loopStart = truncStartSec;
-      src.loopEnd   = truncEndSec;
+      // Loop is tied to where playback starts and a per-track loop point,
+      // not the trunc end — so the loop length follows the grain rather than
+      // always running to the end of the truncated region. loopPoint (0..1)
+      // is a fraction of the trunc region; 1 = loop all the way to trunc end.
+      const lp = tr.loopPoint != null ? tr.loopPoint : 1;
+      const loopEndSec = truncStartSec + clamp(lp, 0.001, 1) * truncDur;
+      src.loopStart = playStartSec;
+      src.loopEnd   = Math.max(playStartSec + 0.005, loopEndSec);
     }
 
     const g = ctx.createGain();
@@ -4645,7 +4652,24 @@
     g.gain.setValueAtTime(1, t + lenSec - rel);
     g.gain.linearRampToValueAtTime(0.0001, t + lenSec);
 
-    src.connect(g).connect(out);
+    // Resonant low-pass with a decay-style filter envelope. The cutoff jumps
+    // to a peak set by fEnvAmt above the base cutoff, then decays back to the
+    // base over fDecay seconds — mirroring the synth voices so the shared
+    // cutoff / reso / fEnvAmt / fDecay LFO targets all apply here too.
+    const f = ctx.createBiquadFilter();
+    f.type = 'lowpass';
+    f.Q.value = tr.reso != null ? tr.reso : 0.7;
+    const baseCut = clamp(tr.cutoff != null ? tr.cutoff : 18000, 40, 18000);
+    const envAmt = tr.fEnvAmt || 0;
+    if (envAmt > 0) {
+      const peak = Math.min(18000, baseCut * (1 + envAmt * 12));
+      f.frequency.setValueAtTime(peak, t);
+      f.frequency.exponentialRampToValueAtTime(Math.max(60, baseCut), t + Math.max(0.005, tr.fDecay || 0.2));
+    } else {
+      f.frequency.setValueAtTime(baseCut, t);
+    }
+
+    src.connect(f).connect(g).connect(out);
     if (tr.loop) {
       src.start(t, playStartSec);
     } else {
@@ -5782,7 +5806,10 @@
           truncStart: 0, truncEnd: 1,
           playStart: 0, length: 200,
           attack: 0.005, release: 0.04,
-          loop: false,
+          // Resonant low-pass + decay-style filter envelope so granular voices
+          // can be shaped (and LFO-modulated) like the synth tracks.
+          cutoff: 18000, reso: 0.7, fEnvAmt: 0, fDecay: 0.2,
+          loop: false, loopPoint: 1,
           lfoRate: 1, lfoDepth: 0, lfoShape: 'sine',
         };
         break;
@@ -10108,11 +10135,22 @@
         knob('Att',   0.001, 0.5, 0.001, track.attack,  v => track.attack  = v, v => v.toFixed(3)),
         knob('Rel',   0.001, 0.5, 0.001, track.release, v => track.release = v, v => v.toFixed(3)),
       ));
+      k.appendChild(group('Filter',
+        knob('Cut', 40, 18000, 1, track.cutoff, v => track.cutoff = v, v => v >= 1000 ? (v/1000).toFixed(1) + 'k' : Math.round(v)),
+        knob('Res', 0.1, 25, 0.1, track.reso, v => track.reso = v, v => v.toFixed(1)),
+        knob('Env', 0, 1, 0.01, track.fEnvAmt, v => track.fEnvAmt = v, v => v.toFixed(2)),
+        knob('fDcy', 0.01, 2, 0.01, track.fDecay, v => track.fDecay = v, v => v.toFixed(2)),
+      ));
       const loopWrap = el('label', 'knob');
       const lcb = el('input'); lcb.type = 'checkbox'; lcb.checked = !!track.loop;
       lcb.addEventListener('change', () => track.loop = lcb.checked);
       loopWrap.appendChild(lcb); loopWrap.appendChild(el('span', null, 'Loop'));
-      k.appendChild(group('Loop', loopWrap));
+      k.appendChild(group('Loop', loopWrap,
+        // Loop point: fraction of the trunc region where the loop wraps back.
+        // 1.0 = loop to the trunc end (legacy); lower it to shorten the loop.
+        knob('Pt', 0.01, 1, 0.001, track.loopPoint != null ? track.loopPoint : 1,
+          v => { track.loopPoint = v; refreshWave(); }, v => v.toFixed(3)),
+      ));
       k.appendChild(group('LFO→Play',
         knob('Rate', 0.01, 20, 0.01, track.lfoRate, v => track.lfoRate = v, v => v.toFixed(2)),
         knob('Dep',  0, 1, 0.01, track.lfoDepth, v => { track.lfoDepth = v; refreshWave(); }, v => v.toFixed(2)),
@@ -13325,7 +13363,8 @@
              'lfoRate','lfoShape','lfoCut','lfoRes','lfoPit','lfoAmp','lfoPan'],
     mic:    ['hpfFreq','inputGain','eqBands','deviceId'],
     granular:['pitch','truncStart','truncEnd','playStart','length','attack','release',
-              'loop','lfoRate','lfoDepth','lfoShape','sampleFile'],
+              'cutoff','reso','fEnvAmt','fDecay',
+              'loop','loopPoint','lfoRate','lfoDepth','lfoShape','sampleFile'],
     sampler: ['pitch','attack','release','selectedPad','pads','sampleFile'],
   };
   function serializeTrack(t) {
