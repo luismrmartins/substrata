@@ -2505,19 +2505,23 @@
     -webkit-backdrop-filter: blur(4px); backdrop-filter: blur(4px);
   }
   .art-box {
-    display: flex; flex-direction: column; gap: 12px;
-    max-width: min(92vw, 900px);
+    display: flex; flex-direction: column; gap: 12px; align-items: center;
+    max-width: min(90vw, 560px);
     background: var(--bg);
     border: 1px solid var(--cell-border);
     padding: 16px;
     box-shadow: 0 24px 70px rgba(0,0,0,0.45);
   }
   .art-title {
+    align-self: flex-start;
     font-size: 11px; letter-spacing: 0.6px; text-transform: uppercase;
     color: var(--muted);
   }
   .art-canvas {
-    width: 100%; height: auto; display: block;
+    display: block;
+    width: auto; height: auto;
+    max-width: 100%; max-height: 72vh;
+    aspect-ratio: 1 / 1;
     border: 1px solid var(--cell-border);
   }
   .art-controls { display: flex; gap: 8px; flex-wrap: wrap; }
@@ -9636,21 +9640,60 @@
       if (j !== accentIdx && j !== whiteIdx) tones[j] = [Math.round(50 + rng() * 30), Math.round(38 + rng() * 26)];
     }
 
-    // Stacked bands via a single vertical gradient with flat plateaus — this
-    // reads as several distinct-but-soft horizontal bands.
-    const grad = ctx.createLinearGradient(0, 0, 0, H);
+    // Band stops: each band is a flat plateau (two stops at the same tone), so
+    // a vertical gradient reads as several distinct-but-soft horizontal bands.
     const stepN = 1 / K;
+    const stops = [];
     for (let i = 0; i < K; i++) {
       const c = (i + 0.5) * stepN;
       const pw = stepN * 0.34;
       const jit = rng() * stepN * 0.2 - stepN * 0.1;
       const s = tones[i][0], l = tones[i][1];
       const col = s > 0 ? acc(s, l) : gray(l);
-      grad.addColorStop(clamp(c - pw + jit, 0, 1), col);
-      grad.addColorStop(clamp(c + pw + jit, 0, 1), col);
+      stops.push([clamp(c - pw + jit, 0, 1), col]);
+      stops.push([clamp(c + pw + jit, 0, 1), col]);
     }
-    ctx.fillStyle = grad;
-    ctx.fillRect(0, 0, W, H);
+
+    // Misaligned bands: split the width into a few columns and shift each
+    // column's bands vertically by its own offset, so the bands don't line up
+    // across the image (as in the reference). A soft blur melts the seams.
+    const whiteCenter = (whiteIdx + 0.5) * stepN;
+    const cols = 2 + Math.floor(rng() * 3);   // 2..4 columns
+    const colW = W / cols;
+    const maxOff = H * (0.05 + rng() * 0.11);
+    const offs = [];
+    for (let j = 0; j < cols; j++) offs.push((rng() * 2 - 1) * maxOff);
+    const band = document.createElement('canvas');
+    band.width = W; band.height = H;
+    const bctx = band.getContext('2d');
+    // 1) base banded gradient per column, shifted by its offset
+    for (let j = 0; j < cols; j++) {
+      const g = bctx.createLinearGradient(0, offs[j], 0, H + offs[j]);
+      for (const st of stops) g.addColorStop(st[0], st[1]);
+      const x0 = Math.floor(j * colW), x1 = Math.floor((j + 1) * colW);
+      bctx.fillStyle = g;
+      bctx.fillRect(x0, 0, x1 - x0 + 1, H);
+    }
+    // 2) luminous white glow on the bright band, following each column's shift
+    for (let j = 0; j < cols; j++) {
+      const gy = offs[j] + whiteCenter * H;
+      const gh = H * 0.05;
+      const x0 = Math.floor(j * colW), x1 = Math.floor((j + 1) * colW);
+      bctx.save();
+      bctx.filter = 'blur(' + Math.round(gh) + 'px)';
+      const gg = bctx.createLinearGradient(0, gy - gh * 2.5, 0, gy + gh * 2.5);
+      gg.addColorStop(0, grayA(99, 0));
+      gg.addColorStop(0.5, grayA(99, 0.5));
+      gg.addColorStop(1, grayA(99, 0));
+      bctx.fillStyle = gg;
+      bctx.fillRect(x0, gy - gh * 3, x1 - x0 + 1, gh * 6);
+      bctx.restore();
+    }
+    // composite the band layer with a soft blur so column seams melt together
+    ctx.save();
+    ctx.filter = 'blur(' + Math.round(W * 0.013) + 'px)';
+    ctx.drawImage(band, 0, 0);
+    ctx.restore();
 
     // Extra hazy bands for depth — soft, mostly grey with occasional accent.
     ctx.save();
@@ -9669,19 +9712,6 @@
       ctx.fillStyle = g;
       ctx.fillRect(0, cy - bh * 1.6, W, bh * 3.2);
     }
-    ctx.restore();
-
-    // Luminous white glow on the bright band.
-    const glowY = H * ((whiteIdx + 0.5) / K);
-    const glowH = H * 0.05;
-    ctx.save();
-    ctx.filter = 'blur(' + Math.round(glowH) + 'px)';
-    const gg = ctx.createLinearGradient(0, glowY - glowH * 2.5, 0, glowY + glowH * 2.5);
-    gg.addColorStop(0, grayA(99, 0));
-    gg.addColorStop(0.5, grayA(99, 0.5));
-    gg.addColorStop(1, grayA(99, 0));
-    ctx.fillStyle = gg;
-    ctx.fillRect(0, glowY - glowH * 3, W, glowH * 6);
     ctx.restore();
 
     // Film grain via a small greyscale noise tile scaled up in 'overlay' blend.
@@ -9720,7 +9750,7 @@
     const box = el('div', 'art-box');
     const title = el('div', 'art-title', (songName.trim() || 'song') + ' — generated artwork');
     const canvas = el('canvas', 'art-canvas');
-    canvas.width = 1200; canvas.height = 800;
+    canvas.width = 1200; canvas.height = 1200;
     const controls = el('div', 'art-controls');
     const regenBtn = el('button', 'mic-btn', '↻ Regenerate');
     const dlBtn    = el('button', 'mic-btn', '⬇ Download PNG');
