@@ -9595,7 +9595,10 @@
     }
     const density = total ? active / total : 0.35;
     const nTracks = tracks.filter(t => t.kind !== 'mic').length;
-    const accentHue = idHash % 360;   // the one additional colour
+    // The one additional colour. Drawn from the seeded RNG so it's specific to
+    // the song *and* changes on every Regenerate (rather than being pinned to
+    // the song hash, which made it always land on the same hue).
+    const accentHue = Math.floor(rng() * 360);
     return { rng, density, nTracks, accentHue };
   }
   function generateSongArtwork(canvas, seed) {
