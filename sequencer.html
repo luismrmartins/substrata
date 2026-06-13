@@ -9654,31 +9654,25 @@
       stops.push([clamp(c + pw + jit, 0, 1), col]);
     }
 
-    // Misaligned bands: split the width into a few columns and shift each
-    // column's bands vertically by its own offset, so the bands don't line up
-    // across the image (as in the reference). A soft blur melts the seams.
+    // Misaligned bands. A full-width base field fills the image (so edges are
+    // always covered), then a few band "segments" are painted over it at
+    // interior x-positions with their own vertical offset. Because the
+    // segments are inset and a different width each, the bands don't all start
+    // and finish at the image edges, and they don't line up vertically either
+    // (as in the reference). A soft blur melts the seams.
     const whiteCenter = (whiteIdx + 0.5) * stepN;
-    const cols = 2 + Math.floor(rng() * 3);   // 2..4 columns
-    const colW = W / cols;
     const maxOff = H * (0.05 + rng() * 0.11);
-    const offs = [];
-    for (let j = 0; j < cols; j++) offs.push((rng() * 2 - 1) * maxOff);
     const band = document.createElement('canvas');
     band.width = W; band.height = H;
     const bctx = band.getContext('2d');
-    // 1) base banded gradient per column, shifted by its offset
-    for (let j = 0; j < cols; j++) {
-      const g = bctx.createLinearGradient(0, offs[j], 0, H + offs[j]);
+    // Paint the banded gradient + its white "horizon" glow into [x0,x1],
+    // shifted vertically by `off`.
+    const paintRegion = (x0, x1, off) => {
+      const g = bctx.createLinearGradient(0, off, 0, H + off);
       for (const st of stops) g.addColorStop(st[0], st[1]);
-      const x0 = Math.floor(j * colW), x1 = Math.floor((j + 1) * colW);
       bctx.fillStyle = g;
-      bctx.fillRect(x0, 0, x1 - x0 + 1, H);
-    }
-    // 2) luminous white glow on the bright band, following each column's shift
-    for (let j = 0; j < cols; j++) {
-      const gy = offs[j] + whiteCenter * H;
-      const gh = H * 0.05;
-      const x0 = Math.floor(j * colW), x1 = Math.floor((j + 1) * colW);
+      bctx.fillRect(x0, 0, x1 - x0, H);
+      const gy = off + whiteCenter * H, gh = H * 0.05;
       bctx.save();
       bctx.filter = 'blur(' + Math.round(gh) + 'px)';
       const gg = bctx.createLinearGradient(0, gy - gh * 2.5, 0, gy + gh * 2.5);
@@ -9686,10 +9680,18 @@
       gg.addColorStop(0.5, grayA(99, 0.5));
       gg.addColorStop(1, grayA(99, 0));
       bctx.fillStyle = gg;
-      bctx.fillRect(x0, gy - gh * 3, x1 - x0 + 1, gh * 6);
+      bctx.fillRect(x0, gy - gh * 3, x1 - x0, gh * 6);
       bctx.restore();
+    };
+    // base field (slight offset), then interior offset segments
+    paintRegion(0, W, (rng() * 2 - 1) * maxOff * 0.3);
+    const segCount = 2 + Math.floor(rng() * 3);   // 2..4 segments
+    for (let s = 0; s < segCount; s++) {
+      const cw = W * (0.22 + rng() * 0.42);       // 22%..64% of the width
+      const x0 = Math.round(rng() * (W - cw));     // floats anywhere inside
+      paintRegion(x0, x0 + cw, (rng() * 2 - 1) * maxOff);
     }
-    // composite the band layer with a soft blur so column seams melt together
+    // composite the band layer with a soft blur so the seams melt together
     ctx.save();
     ctx.filter = 'blur(' + Math.round(W * 0.013) + 'px)';
     ctx.drawImage(band, 0, 0);
