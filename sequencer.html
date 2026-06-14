@@ -624,6 +624,22 @@
     align-self: center;
     cursor: default;
   }
+  /* Step-record arm button + write-head highlight */
+  .step-rec-btn.on {
+    background: #c0392b; color: #fff; border-color: #c0392b;
+  }
+  .step.rec-head {
+    box-shadow: inset 0 0 0 2px var(--accent);
+  }
+  /* Small corner mark on steps that carry a recorded chord */
+  .step.chord-step::after {
+    content: '';
+    position: absolute;
+    top: 2px; right: 2px;
+    width: 0; height: 0;
+    border-top: 5px solid var(--accent);
+    border-left: 5px solid transparent;
+  }
   .pattern-preview {
     background: transparent;
     border: 1px solid var(--cell-border);
@@ -11170,6 +11186,8 @@
 
       track.stepsEl.appendChild(col);
     }
+    // Re-apply the step-record write-head highlight after rebuilding cells.
+    if (stepRecActive && track.id === selectedTrackId) updateRecHead(track);
   }
 
   function defaultEntry(track) {
@@ -11192,6 +11210,8 @@
     const on = !!track.pattern[i];
     cell.classList.toggle('on', on);
     cell.classList.toggle('slide', on && track.pattern[i].slide);
+    // Mark steps that hold a recorded chord (more than one note).
+    cell.classList.toggle('chord-step', on && Array.isArray(track.pattern[i].chord) && track.pattern[i].chord.length > 1);
     // Use the dedicated pitch span so the beat-counter overlay survives.
     const pitchEl = cell._pitchEl;
     let txt = '';
@@ -12138,21 +12158,33 @@
             } catch (e) {}
             t._lastTrigGain = null;
           }
-          // Per-trigger gain — start from near-zero and ramp to vel over 2 ms so the
-          // trigger boundary itself never produces a click, regardless of voice attack.
-          const tg = audioCtx.createGain();
-          tg.gain.setValueAtTime(0.0001, t.nextNoteTime);
-          tg.gain.exponentialRampToValueAtTime(Math.max(0.0001, effVel), t.nextNoteTime + 0.002);
-          const tp = audioCtx.createStereoPanner(); tp.pan.value = pan;
-          tg.connect(tp).connect(t.input);
+          // A step can hold a chord (several semitone offsets, recorded from the
+          // keyboard). Trigger the voice once per note; a plain step is just a
+          // one-note chord. The Chord instrument makes its own chords from a
+          // degree, so it always triggers once.
+          const pitches = (t.kind !== 'chord' && Array.isArray(entry.chord) && entry.chord.length)
+            ? entry.chord
+            : [entry.pitch || 0];
           const env = {
             stepDur: sDur,
             prevFreq:  t._prevFreq,
             prevSlide: t._prevSlide,
           };
-          const vDest = (t.kind === 'drum') ? drumEnvNode(audioCtx, t.nextNoteTime, t, tg) : tg;
-          t.voice(audioCtx, t.nextNoteTime, vDest, t, entry, env);
-          if (t.mono) t._lastTrigGain = tg;
+          let lastTg = null;
+          for (const np of pitches) {
+            // Per-trigger gain — start near-zero and ramp to vel over 2 ms so the
+            // trigger boundary never clicks, regardless of voice attack.
+            const tg = audioCtx.createGain();
+            tg.gain.setValueAtTime(0.0001, t.nextNoteTime);
+            tg.gain.exponentialRampToValueAtTime(Math.max(0.0001, effVel), t.nextNoteTime + 0.002);
+            const tp = audioCtx.createStereoPanner(); tp.pan.value = pan;
+            tg.connect(tp).connect(t.input);
+            const noteStep = (pitches.length > 1) ? Object.assign({}, entry, { pitch: np }) : entry;
+            const vDest = (t.kind === 'drum') ? drumEnvNode(audioCtx, t.nextNoteTime, t, tg) : tg;
+            t.voice(audioCtx, t.nextNoteTime, vDest, t, noteStep, env);
+            lastTg = tg;
+          }
+          if (t.mono) t._lastTrigGain = lastTg;
           if (i === duckCfg.sourceIndex) triggerDuck(t.nextNoteTime);
         }
         if (entry && (t.kind === 'bass' || t.kind === 'lead' || t.kind === 'sh101' || t.kind === 'juno' || t.kind === 'cs80')) {
@@ -12639,44 +12671,144 @@
     KeyQ: 12, Digit2: 13, KeyW: 14, Digit3: 15, KeyE: 16, KeyR: 17,
     Digit5: 18, KeyT: 19, Digit6: 20, KeyY: 21, Digit7: 22, KeyU: 23, KeyI: 24,
   };
-  function playLiveNote(track, offset) {
-    if (!track || !track.voice || !KBD_PLAYABLE.has(track.kind)) return;
+  // A live note is gated: the voice is triggered with a long hold and routed
+  // through a dedicated gain node, which is ramped down (and disconnected) when
+  // the key is released — so notes sustain while held and stop on key-up.
+  const LIVE_MAX_HOLD = 8;   // seconds — caps how long a held note can ring
+  function startLiveVoice(track, offset) {
+    if (!track || !track.voice || !KBD_PLAYABLE.has(track.kind)) return null;
     initAudio();
     cancelAudioSuspend();
     if (audioCtx.state === 'suspended') audioCtx.resume();
     if (!track.input) initTrackAudio(track);
+    const ctx = audioCtx;
     const bpm = parseFloat(bpmInput.value) || 120;
     const stepDur = (60 / bpm) / 4;
-    const at = audioCtx.currentTime + 0.02;
-    // Hold the note ~0.55 s regardless of tempo so live chords ring out.
-    const length = clamp(0.55 / stepDur, 0.5, 8);
+    const at = ctx.currentTime + 0.02;
+    const gate = ctx.createGain();
+    gate.gain.value = 1;
+    gate.connect(track.input);
+    const length = LIVE_MAX_HOLD / stepDur;   // long hold (in steps) so it sustains
     const env = { stepDur, prevFreq: null, prevSlide: false };
     const step = (track.kind === 'chord')
       ? { degree: offset, quality: 'auto', length, vel: 1 }
       : { pitch: offset, slide: false, length, vel: 1 };
-    try { track.voice(audioCtx, at, track.input, track, step, env); }
+    try { track.voice(ctx, at, gate, track, step, env); }
     catch (e) { console.warn('Live note failed:', e); }
-    if (!isPlaying) scheduleAudioSuspend();
+    let stopped = false;
+    return function stop() {
+      if (stopped) return;
+      stopped = true;
+      const now = ctx.currentTime, rel = 0.12;
+      try {
+        gate.gain.cancelScheduledValues(now);
+        gate.gain.setValueAtTime(gate.gain.value, now);
+        gate.gain.linearRampToValueAtTime(0.0001, now + rel);
+      } catch (e) {}
+      setTimeout(() => {
+        try { gate.disconnect(); } catch (e) {}
+        if (!isPlaying) scheduleAudioSuspend();
+      }, (rel + 0.05) * 1000);
+    };
   }
-  const _kbdHeld = new Set();
+
+  // ---------- Step recording (play chords into the sequencer) ----------
+  // Arm a track, then play on the keyboard: each chord you play (a set of keys
+  // pressed and released together) is written to the current step and the
+  // write-head advances. Space = rest, Backspace = step back & clear.
+  const _kbdVoices = new Map();     // e.code -> stop()
+  let stepRecActive = false;
+  let stepRecPos = 0;
+  const _recChord = new Set();      // semitone offsets gathered for the current step
+  function setStepRec(track, on) {
+    stepRecActive = on;
+    stepRecPos = 0;
+    _recChord.clear();
+    updateRecHead(track);
+    refreshStepRecBtns();
+  }
+  function refreshStepRecBtns() {
+    document.querySelectorAll('.step-rec-btn').forEach(b =>
+      b.classList.toggle('on', stepRecActive));
+  }
+  function updateRecHead(track) {
+    if (!track || !track.stepsEl) return;
+    const cols = track.stepsEl.children;
+    for (let i = 0; i < cols.length; i++) {
+      const cell = cols[i].firstChild;
+      if (cell) cell.classList.toggle('rec-head', stepRecActive && i === stepRecPos);
+    }
+  }
+  function recWriteStep(track, offsets) {
+    if (!Array.isArray(track.pattern) || !track.pattern.length) return;
+    const pos = stepRecPos % track.pattern.length;
+    if (offsets && offsets.length) {
+      const e = defaultEntry(track);
+      const offs = [...new Set(offsets)].sort((a, b) => a - b);
+      if (track.kind === 'chord') {
+        e.degree = clamp(offs[0], 0, 6);
+      } else {
+        e.pitch = offs[0];
+        if (offs.length > 1) e.chord = offs;
+      }
+      track.pattern[pos] = e;
+    } else {
+      track.pattern[pos] = false;   // rest
+    }
+    stepRecPos = (pos + 1) % track.pattern.length;
+    rebuildSteps(track);
+    updateRecHead(track);
+  }
   function kbdNoteDown(e) {
-    if (e.repeat || e.metaKey || e.ctrlKey || e.altKey) return;
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
     if (currentMode !== 'recording') return;            // Track view only
     const tgt = e.target;
     if (tgt && (tgt.tagName === 'INPUT' || tgt.tagName === 'SELECT' ||
                 tgt.tagName === 'TEXTAREA' || tgt.isContentEditable)) return;
-    const offset = KBD_OFFSETS[e.code];
-    if (offset === undefined) return;
     const track = tracks.find(t => t.id === selectedTrackId);
     if (!track || !KBD_PLAYABLE.has(track.kind)) return;
+
+    // Step-record transport keys (only while armed).
+    if (stepRecActive) {
+      if (e.code === 'Space')     { e.preventDefault(); if (!e.repeat) recWriteStep(track, null); return; }
+      if (e.code === 'Backspace') {
+        e.preventDefault();
+        if (!e.repeat) {
+          stepRecPos = (stepRecPos - 1 + track.pattern.length) % track.pattern.length;
+          track.pattern[stepRecPos] = false;
+          rebuildSteps(track); updateRecHead(track);
+        }
+        return;
+      }
+    }
+
+    const offset = KBD_OFFSETS[e.code];
+    if (offset === undefined) return;
     e.preventDefault();
-    if (_kbdHeld.has(e.code)) return;                    // ignore key auto-repeat
-    _kbdHeld.add(e.code);
-    playLiveNote(track, offset);
+    if (e.repeat || _kbdVoices.has(e.code)) return;     // ignore auto-repeat / already held
+    const stop = startLiveVoice(track, offset);
+    if (stop) _kbdVoices.set(e.code, stop);
+    if (stepRecActive) _recChord.add(offset);
   }
-  function kbdNoteUp(e) { _kbdHeld.delete(e.code); }
+  function kbdNoteUp(e) {
+    const stop = _kbdVoices.get(e.code);
+    if (stop) { stop(); _kbdVoices.delete(e.code); }
+    // When the last held key is released, commit the gathered chord to a step.
+    if (stepRecActive && _kbdVoices.size === 0 && _recChord.size > 0) {
+      const track = tracks.find(t => t.id === selectedTrackId);
+      const offs = [..._recChord];
+      _recChord.clear();
+      if (track) recWriteStep(track, offs);
+    }
+  }
+  function releaseAllLiveVoices() {
+    _kbdVoices.forEach(stop => { try { stop(); } catch (e) {} });
+    _kbdVoices.clear();
+    _recChord.clear();
+  }
   window.addEventListener('keydown', kbdNoteDown);
   window.addEventListener('keyup', kbdNoteUp);
+  window.addEventListener('blur', releaseAllLiveVoices);
 
   // ---------- Per-track A / B / C morph ----------
   // Each track stores up to three snapshots of its instrument + channel
@@ -13030,6 +13162,11 @@
             previewBtn.addEventListener('click', () => previewTrack(t));
             nameRow.appendChild(previewBtn);
             if (KBD_PLAYABLE.has(t.kind)) {
+              const recBtn = el('button', 'small step-rec-btn', '● Rec');
+              recBtn.title = 'Step-record: play chords on the keyboard to fill steps (Space = rest, Backspace = back)';
+              if (stepRecActive) recBtn.classList.add('on');
+              recBtn.addEventListener('click', (e) => { e.stopPropagation(); setStepRec(t, !stepRecActive); });
+              nameRow.appendChild(recBtn);
               const kbdHint = el('span', 'kbd-play-hint', '⌨ Z–M · Q–U');
               kbdHint.title = 'Play live with your computer keyboard — hold several keys at once for chords';
               nameRow.appendChild(kbdHint);
@@ -13523,12 +13660,18 @@
         const vel = entry.vel ?? 1;
         const pan = entry.pan ?? 0;
         const effVel = entry.accent ? Math.min(2, vel * (1 + ACCENT_BOOST)) : vel;
-        const tg = offline.createGain(); tg.gain.value = effVel;
-        const tp = offline.createStereoPanner(); tp.pan.value = pan;
-        tg.connect(tp).connect(input);
         const env = { stepDur, prevFreq, prevSlide };
-        const vDest = (t.kind === 'drum') ? drumEnvNode(offline, time, t, tg) : tg;
-        try { t.voice(offline, time, vDest, t, entry, env); } catch (e) { /* skip */ }
+        const pitches = (t.kind !== 'chord' && Array.isArray(entry.chord) && entry.chord.length)
+          ? entry.chord
+          : [entry.pitch || 0];
+        for (const np of pitches) {
+          const tg = offline.createGain(); tg.gain.value = effVel;
+          const tp = offline.createStereoPanner(); tp.pan.value = pan;
+          tg.connect(tp).connect(input);
+          const noteStep = (pitches.length > 1) ? Object.assign({}, entry, { pitch: np }) : entry;
+          const vDest = (t.kind === 'drum') ? drumEnvNode(offline, time, t, tg) : tg;
+          try { t.voice(offline, time, vDest, t, noteStep, env); } catch (e) { /* skip */ }
+        }
         if (t.kind === 'bass' || t.kind === 'lead' || t.kind === 'sh101' || t.kind === 'juno' || t.kind === 'cs80') {
           prevFreq = midiToFreq(t.root + (entry.pitch || 0));
           prevSlide = !!entry.slide;
