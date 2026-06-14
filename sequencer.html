@@ -3214,6 +3214,7 @@
         <button class="small add-track" data-kind="mellotron">+ Mellotron</button>
         <button class="small add-track" data-kind="mic">+ Mic</button>
         <button class="small add-track" data-kind="granular">+ Granular</button>
+        <button class="small add-track" data-kind="quanta">+ Quanta</button>
         <button class="small add-track" data-kind="sampler">+ Sampler</button>
       </div>
 
@@ -4771,6 +4772,79 @@
     src.stop(t + sliceSec + 0.05);
   }
 
+  // ---------- quanta (Alva Noto / Ryoji Ikeda style sound-quanta) ----------
+  // Clinical digital micro-sounds: a pure sine/square tone, a high bandpassed
+  // noise click, and a noise layer — all wrapped in a very short grain
+  // envelope, with an optional bit-crush waveshaper for that quantised digital
+  // grit. Pitched (reads step.pitch) so it sequences / plays from the keyboard.
+  let _quantaCrushCache = {};
+  function quantaCrushCurve(amount) {
+    const key = amount.toFixed(2);
+    if (_quantaCrushCache[key]) return _quantaCrushCache[key];
+    const bits = Math.max(1.5, 12 - amount * 10);   // 12 bits → ~2 bits
+    const levels = Math.pow(2, bits);
+    const n = 2048, curve = new Float32Array(n);
+    for (let i = 0; i < n; i++) {
+      const x = (i / (n - 1)) * 2 - 1;
+      curve[i] = Math.round(x * levels) / levels;
+    }
+    _quantaCrushCache[key] = curve;
+    return curve;
+  }
+  function vQuanta(ctx, t, out, tr, step) {
+    const offset = (step && step.pitch) || 0;
+    const freq = clamp(midiToFreq((tr.root || 84) + offset), 20, 20000);
+    const att = Math.max(0.0003, tr.attack || 0.001);
+    const dec = Math.max(0.004, tr.decay || 0.06);
+    const peak = t + att;
+    const end = peak + dec;
+
+    // Grain envelope → optional bit-crush → out.
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(1, peak);
+    g.gain.exponentialRampToValueAtTime(0.0001, end);
+    if ((tr.crush || 0) > 0.001) {
+      const ws = ctx.createWaveShaper();
+      ws.curve = quantaCrushCurve(tr.crush);
+      g.connect(ws); ws.connect(out);
+    } else {
+      g.connect(out);
+    }
+
+    // Pure tone (sine / square / triangle).
+    const toneLevel = tr.toneLevel != null ? tr.toneLevel : 1;
+    if (toneLevel > 0) {
+      const osc = ctx.createOscillator();
+      osc.type = tr.wave || 'sine';
+      osc.frequency.setValueAtTime(freq, t);
+      const og = ctx.createGain(); og.gain.value = toneLevel;
+      osc.connect(og).connect(g);
+      osc.start(t); osc.stop(end + 0.02);
+    }
+    // High bandpassed noise click — ultra-short impulse for the digital tick.
+    if ((tr.clickLevel || 0) > 0) {
+      const src = ctx.createBufferSource(); src.buffer = getNoise(ctx); src.loop = true;
+      const bp = ctx.createBiquadFilter(); bp.type = 'bandpass';
+      bp.frequency.value = clamp(freq * 2, 300, 18000); bp.Q.value = 1.5;
+      const cg = ctx.createGain();
+      cg.gain.setValueAtTime(Math.max(0.0001, tr.clickLevel), t);
+      cg.gain.exponentialRampToValueAtTime(0.0001, t + 0.012);
+      src.connect(bp).connect(cg).connect(g);
+      src.start(t); src.stop(t + 0.05);
+    }
+    // Bandpassed noise layer across the grain — static / hiss colour.
+    if ((tr.noiseLevel || 0) > 0) {
+      const src = ctx.createBufferSource(); src.buffer = getNoise(ctx); src.loop = true;
+      const bp = ctx.createBiquadFilter(); bp.type = 'bandpass';
+      bp.frequency.value = clamp(tr.noiseFreq || 5000, 60, 19000);
+      bp.Q.value = tr.noiseQ || 1;
+      const ng = ctx.createGain(); ng.gain.value = tr.noiseLevel;
+      src.connect(bp).connect(ng).connect(g);
+      src.start(t); src.stop(end + 0.02);
+    }
+  }
+
   // One-shot pad audition — routes a sampler pad straight to the track input
   // so the user hears the same chain (EQ / sends / fx) as during playback.
   function previewPad(track, padIdx) {
@@ -5674,6 +5748,7 @@
   const KIND_LABELS = {
     drum: 'Drum', bass: 'Bass', lead: 'Synth', chord: 'Chord',
     mellotron: 'Mellotron', mic: 'Mic', granular: 'Granular', sampler: 'Sampler',
+    quanta: 'Quanta',
   };
 
   let nextTrackId = 1;
@@ -5883,6 +5958,17 @@
           })),
         };
         break;
+      case 'quanta':
+        specific = {
+          voice: vQuanta,
+          root: 84,                       // sine pips sit high by default
+          wave: 'sine',
+          toneLevel: 1, clickLevel: 0.5, noiseLevel: 0,
+          noiseFreq: 6000, noiseQ: 1,
+          attack: 0.001, decay: 0.05,
+          crush: 0,
+        };
+        break;
     }
     const t = { ...base, ...specific, ...overrides };
     // Normalise the 4-slot groups array — old projects saved before
@@ -5914,6 +6000,7 @@
     if (t.kind === 'granular') t.voice = vGranular;
     if (t.kind === 'sampler')  t.voice = vSampler;
     if (t.kind === 'mellotron') t.voice = vMellotron;
+    if (t.kind === 'quanta')   t.voice = vQuanta;
     return t;
   }
 
@@ -6984,6 +7071,11 @@
         if (track.kind === 'granular' || track.kind === 'mellotron') {
           const scaleSemis = [0, 2, 3, 5, 7, 8, 10, 12];
           entry.pitch = scaleSemis[Math.floor(Math.random() * scaleSemis.length)];
+        }
+        if (track.kind === 'quanta') {
+          // wide, sparse, octave-spanning pips — the Ikeda/Noto pointillism
+          const semis = [0, 5, 7, 12, 19, 24];
+          entry.pitch = semis[Math.floor(Math.random() * semis.length)];
         }
         if (track.kind === 'sampler') {
           entry.pad = Math.floor(Math.random() * 16);
@@ -10430,6 +10522,25 @@
       ));
     }
 
+    if (track.kind === 'quanta') {
+      k.appendChild(group('Tone',
+        numField('Root', 24, 108, track.root, n => track.root = n),
+        selectField('Wave', ['sine','square','triangle'], track.wave, v => track.wave = v),
+        knob('Tone', 0, 1, 0.01, track.toneLevel, v => track.toneLevel = v, v => v.toFixed(2)),
+        knob('Crush', 0, 1, 0.01, track.crush, v => track.crush = v, v => v.toFixed(2)),
+      ));
+      k.appendChild(group('Grain',
+        knob('Att', 0.0003, 0.05, 0.0003, track.attack, v => track.attack = v, v => (v * 1000).toFixed(1) + 'm'),
+        knob('Dec', 0.004, 0.6, 0.002, track.decay, v => track.decay = v, v => (v * 1000).toFixed(0) + 'm'),
+      ));
+      k.appendChild(group('Noise',
+        knob('Click', 0, 1, 0.01, track.clickLevel, v => track.clickLevel = v, v => v.toFixed(2)),
+        knob('Hiss', 0, 1, 0.01, track.noiseLevel, v => track.noiseLevel = v, v => v.toFixed(2)),
+        knob('Freq', 60, 18000, 20, track.noiseFreq, v => track.noiseFreq = v, v => Math.round(v)),
+        knob('Q', 0.3, 12, 0.1, track.noiseQ, v => track.noiseQ = v, v => v.toFixed(1)),
+      ));
+    }
+
     if (track.kind === 'sampler') {
       const area = el('div', 'sample-area');
       const head = el('div', 'group');
@@ -10998,7 +11109,7 @@
         if (condRef) renderCond(condRef, track, i);
       });
 
-      if (track.kind === 'bass' || track.kind === 'lead' || track.kind === 'sh101' || track.kind === 'juno' || track.kind === 'cs80' || track.kind === 'granular' || track.kind === 'mellotron') {
+      if (track.kind === 'bass' || track.kind === 'lead' || track.kind === 'sh101' || track.kind === 'juno' || track.kind === 'cs80' || track.kind === 'granular' || track.kind === 'mellotron' || track.kind === 'quanta') {
         cell.addEventListener('wheel', (e) => {
           if (!track.pattern[i]) return;
           e.preventDefault();
@@ -11198,6 +11309,7 @@
     if (track.kind === 'mellotron') return { ...base, pitch: 0, length: len };
     if (track.kind === 'chord') return { ...base, degree: 0, quality: 'auto', length: len };
     if (track.kind === 'sampler') return { ...base, pad: track.selectedPad || 0, length: len };
+    if (track.kind === 'quanta') return { ...base, pitch: 0 };
     return base;
   }
   // Which kinds support per-step note length
@@ -11215,7 +11327,7 @@
     // Use the dedicated pitch span so the beat-counter overlay survives.
     const pitchEl = cell._pitchEl;
     let txt = '';
-    if (on && (track.kind === 'bass' || track.kind === 'lead' || track.kind === 'sh101' || track.kind === 'juno' || track.kind === 'cs80' || track.kind === 'granular' || track.kind === 'mellotron')) {
+    if (on && (track.kind === 'bass' || track.kind === 'lead' || track.kind === 'sh101' || track.kind === 'juno' || track.kind === 'cs80' || track.kind === 'granular' || track.kind === 'mellotron' || track.kind === 'quanta')) {
       txt = String(track.pattern[i].pitch);
     } else if (on && track.kind === 'chord') {
       const numerals = ['I','II','III','IV','V','VI','VII'];
@@ -12491,7 +12603,8 @@
     ['mellotron', 'Mellotron'],
     ['mic',       'Mic'],
     ['granular',  'Granular'],
-    ['sampler',   'Sampler']
+    ['sampler',   'Sampler'],
+    ['quanta',    'Quanta']
   ];
   function appendAddInstrumentButton(host) {
     if (!host) return;
@@ -12662,7 +12775,7 @@
   // holding several keys at once sounds a chord (each key triggers its own
   // voice). Pitched synths map keys to semitone offsets from the track root;
   // the Chord instrument maps them to ascending scale degrees instead.
-  const KBD_PLAYABLE = new Set(['bass', 'lead', 'sh101', 'juno', 'cs80', 'mellotron', 'granular', 'chord']);
+  const KBD_PLAYABLE = new Set(['bass', 'lead', 'sh101', 'juno', 'cs80', 'mellotron', 'granular', 'chord', 'quanta']);
   // Physical-key layout (keyed by e.code) so it works on any keyboard locale:
   // lower row z..m = one octave, upper row q..u = the octave above.
   const KBD_OFFSETS = {
@@ -13824,6 +13937,7 @@
               'cutoff','reso','fEnvAmt','fDecay',
               'loop','loopPoint','lfoRate','lfoDepth','lfoShape','sampleFile'],
     sampler: ['pitch','attack','release','selectedPad','pads','sampleFile'],
+    quanta:  ['root','wave','toneLevel','clickLevel','noiseLevel','noiseFreq','noiseQ','attack','decay','crush'],
   };
   function serializeTrack(t) {
     const out = {};
