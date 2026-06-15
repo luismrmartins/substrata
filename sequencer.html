@@ -624,11 +624,14 @@
     align-self: center;
     cursor: default;
   }
-  /* Step-record arm button + write-head highlight */
+  /* Chord-drop arm button + stampable-step affordance */
   .step-rec-btn.on {
     background: #c0392b; color: #fff; border-color: #c0392b;
   }
-  .step.rec-head {
+  /* While armed, the step grid shows that cells are stampable: hovering an
+     empty step previews the drop, and the cursor signals a copy action. */
+  .steps-row.chord-place .step { cursor: copy; }
+  .steps-row.chord-place .step:not(.on):hover {
     box-shadow: inset 0 0 0 2px var(--accent);
   }
   /* Small corner mark on steps that carry a recorded chord */
@@ -10888,7 +10891,7 @@
         knob('aA', 0.001, 1, 0.001, track.attack,  v => track.attack  = v, v => v.toFixed(3)),
         knob('aD', 0.01,  2,   0.01, track.decay,   v => track.decay   = v, v => v.toFixed(2)),
         knob('aS', 0,     1,   0.01, track.sustain, v => track.sustain = v, v => v.toFixed(2)),
-        knob('aR', 0.01,  3,   0.01, track.release, v => track.release = v, v => v.toFixed(2)),
+        knob('aR', 0.01,  8,   0.01, track.release, v => track.release = v, v => v.toFixed(2)),
       ));
       k.appendChild(group('LFO',
         knob('Rate', 0.05, 30, 0.05, track.lfoRate, v => track.lfoRate = v, v => v.toFixed(2)),
@@ -10984,7 +10987,7 @@
         knob('aA', 0.001, 1, 0.001, track.attack,  v => track.attack  = v, v => v.toFixed(3)),
         knob('aD', 0.01,  2,   0.01, track.decay,   v => track.decay   = v, v => v.toFixed(2)),
         knob('aS', 0,     1,   0.01, track.sustain, v => track.sustain = v, v => v.toFixed(2)),
-        knob('aR', 0.01,  3,   0.01, track.release, v => track.release = v, v => v.toFixed(2)),
+        knob('aR', 0.01,  8,   0.01, track.release, v => track.release = v, v => v.toFixed(2)),
       ));
       k.appendChild(group('LFO',
         knob('Rate', 0.05, 30, 0.05, track.lfoRate, v => track.lfoRate = v, v => v.toFixed(2)),
@@ -11092,14 +11095,21 @@
       let velRef = null, panRef = null, lenRef = null, accRef = null, probRef = null, condRef = null;
 
       cell.addEventListener('click', (e) => {
-        if ((track.kind === 'bass' || track.kind === 'lead' || track.kind === 'sh101' || track.kind === 'juno' || track.kind === 'cs80') && e.shiftKey) {
+        // Chord-place mode: clicking stamps the last-played chord onto an empty
+        // step, or clears a filled one. Falls back to a normal toggle if no
+        // chord has been captured yet.
+        if (stepRecActive && track.id === selectedTrackId) {
+          if (track.pattern[i]) track.pattern[i] = false;
+          else if (!stampChordAt(track, i)) toggleStep(track, i);
+        } else if ((track.kind === 'bass' || track.kind === 'lead' || track.kind === 'sh101' || track.kind === 'juno' || track.kind === 'cs80') && e.shiftKey) {
           if (track.pattern[i]) {
             track.pattern[i].slide = !track.pattern[i].slide;
             renderStep(cell, track, i);
           }
           return;
+        } else {
+          toggleStep(track, i);
         }
-        toggleStep(track, i);
         renderStep(cell, track, i);
         if (velRef) renderLane(velRef, track, i, 'vel');
         if (panRef) renderLane(panRef, track, i, 'pan');
@@ -11297,8 +11307,8 @@
 
       track.stepsEl.appendChild(col);
     }
-    // Re-apply the step-record write-head highlight after rebuilding cells.
-    if (stepRecActive && track.id === selectedTrackId) updateRecHead(track);
+    // Re-apply the chord-place affordance after rebuilding cells.
+    if (stepRecActive && track.id === selectedTrackId) updatePlaceMode(track);
   }
 
   function defaultEntry(track) {
@@ -12785,9 +12795,15 @@
     Digit5: 18, KeyT: 19, Digit6: 20, KeyY: 21, Digit7: 22, KeyU: 23, KeyI: 24,
   };
   // A live note is gated: the voice is triggered with a long hold and routed
-  // through a dedicated gain node, which is ramped down (and disconnected) when
-  // the key is released — so notes sustain while held and stop on key-up.
-  const LIVE_MAX_HOLD = 8;   // seconds — caps how long a held note can ring
+  // through a dedicated gain node. The gate carries the whole amplitude
+  // envelope of the held note — it fades in over the track's Attack while the
+  // key is down and, on release, fades out over its Release. The voice itself
+  // is triggered with a neutral amp envelope so its per-step A/D/S/R (which is
+  // meant for fixed-length sequencer hits) doesn't fight the gate; the filter
+  // envelope and everything else still apply. Previously the gate ignored both
+  // knobs (it snapped on instantly and always released in a fixed 0.12s), so
+  // the Attack/Release knobs had no audible effect on played notes.
+  const LIVE_MAX_HOLD = 16;   // seconds — caps how long a held note can ring (long enough to render full release tails)
   function startLiveVoice(track, offset) {
     if (!track || !track.voice || !KBD_PLAYABLE.has(track.kind)) return null;
     initAudio();
@@ -12798,79 +12814,102 @@
     const bpm = parseFloat(bpmInput.value) || 120;
     const stepDur = (60 / bpm) / 4;
     const at = ctx.currentTime + 0.02;
+    const att = Math.max(0.002, track.attack != null ? track.attack : 0.005);
     const gate = ctx.createGain();
-    gate.gain.value = 1;
+    gate.gain.setValueAtTime(0.0001, at);
+    gate.gain.linearRampToValueAtTime(1, at + att);   // Attack knob shapes the swell
     gate.connect(track.input);
     const length = LIVE_MAX_HOLD / stepDur;   // long hold (in steps) so it sustains
     const env = { stepDur, prevFreq: null, prevSlide: false };
+    // Neutral amp envelope: rise instantly to full and hold there, leaving the
+    // gate in sole charge of attack/release for the live note.
+    const liveTr = Object.assign({}, track, { attack: 0.002, decay: 0.004, sustain: 1, release: 0.02 });
     const step = (track.kind === 'chord')
       ? { degree: offset, quality: 'auto', length, vel: 1 }
       : { pitch: offset, slide: false, length, vel: 1 };
-    try { track.voice(ctx, at, gate, track, step, env); }
+    try { track.voice(ctx, at, gate, liveTr, step, env); }
     catch (e) { console.warn('Live note failed:', e); }
     let stopped = false;
     return function stop() {
       if (stopped) return;
       stopped = true;
-      const now = ctx.currentTime, rel = 0.12;
+      const now = ctx.currentTime;
+      const rel = Math.max(0.05, track.release != null ? track.release : 0.12);   // Release knob shapes the tail
       try {
-        gate.gain.cancelScheduledValues(now);
-        gate.gain.setValueAtTime(gate.gain.value, now);
-        gate.gain.linearRampToValueAtTime(0.0001, now + rel);
+        // Hold the gate at whatever level it has reached, then ring out over
+        // the Release time. cancelAndHoldAtTime keeps the current value (a bare
+        // cancelScheduledValues + value read can snap the gain back to its
+        // near-zero start, killing the tail). The release is exponential —
+        // linear-in-dB — so the note decays naturally instead of cutting off.
+        if (typeof gate.gain.cancelAndHoldAtTime === 'function') {
+          gate.gain.cancelAndHoldAtTime(now);
+        } else {
+          const cur = Math.max(0.0001, gate.gain.value);
+          gate.gain.cancelScheduledValues(now);
+          gate.gain.setValueAtTime(cur, now);
+        }
+        gate.gain.exponentialRampToValueAtTime(0.0001, now + rel);
+        gate.gain.setValueAtTime(0, now + rel + 0.01);
       } catch (e) {}
       setTimeout(() => {
         try { gate.disconnect(); } catch (e) {}
         if (!isPlaying) scheduleAudioSuspend();
-      }, (rel + 0.05) * 1000);
+      }, (rel + 0.12) * 1000);
     };
   }
 
-  // ---------- Step recording (play chords into the sequencer) ----------
-  // Arm a track, then play on the keyboard: each chord you play (a set of keys
-  // pressed and released together) is written to the current step and the
-  // write-head advances. Space = rest, Backspace = step back & clear.
+  // ---------- Chord place mode (play a chord, then click steps to drop it) ----------
+  // Arm a track, then play a chord on the keyboard — the notes you hold are
+  // captured into a buffer (you still hear them live). Nothing is written
+  // until you click a step: clicking an empty step stamps the captured chord
+  // there, clicking a filled step clears it. Play a new chord at any time to
+  // change what gets stamped. This replaces the old sequential write-head,
+  // which forced chords into consecutive steps in the order you played them.
   const _kbdVoices = new Map();     // e.code -> stop()
   let stepRecActive = false;
-  let stepRecPos = 0;
-  const _recChord = new Set();      // semitone offsets gathered for the current step
+  const _recChord = new Set();      // offsets gathered while keys are held
+  let _capturedChord = null;        // last fully-played chord, awaiting placement
   function setStepRec(track, on) {
     stepRecActive = on;
-    stepRecPos = 0;
     _recChord.clear();
-    updateRecHead(track);
+    _capturedChord = null;
+    updatePlaceMode(track);
     refreshStepRecBtns();
   }
   function refreshStepRecBtns() {
-    document.querySelectorAll('.step-rec-btn').forEach(b =>
-      b.classList.toggle('on', stepRecActive));
+    document.querySelectorAll('.step-rec-btn').forEach(b => {
+      b.classList.toggle('on', stepRecActive);
+      b.textContent = stepRecActive ? capturedChordLabel() : '● Drop';
+    });
   }
-  function updateRecHead(track) {
-    if (!track || !track.stepsEl) return;
-    const cols = track.stepsEl.children;
-    for (let i = 0; i < cols.length; i++) {
-      const cell = cols[i].firstChild;
-      if (cell) cell.classList.toggle('rec-head', stepRecActive && i === stepRecPos);
+  function capturedChordLabel() {
+    if (!_capturedChord || !_capturedChord.length) return 'play a chord…';
+    return '♪ ' + _capturedChord.length + (_capturedChord.length > 1 ? ' notes' : ' note');
+  }
+  // Toggle the place-mode affordance on the armed track's step grid so the
+  // user can see steps are stampable (and remove it from every other grid).
+  function updatePlaceMode(track) {
+    document.querySelectorAll('.steps-row.chord-place')
+      .forEach(el => el.classList.remove('chord-place'));
+    if (stepRecActive && track && track.stepsEl) {
+      track.stepsEl.classList.add('chord-place');
     }
   }
-  function recWriteStep(track, offsets) {
-    if (!Array.isArray(track.pattern) || !track.pattern.length) return;
-    const pos = stepRecPos % track.pattern.length;
-    if (offsets && offsets.length) {
-      const e = defaultEntry(track);
-      const offs = [...new Set(offsets)].sort((a, b) => a - b);
-      if (track.kind === 'chord') {
-        e.degree = clamp(offs[0], 0, 6);
-      } else {
-        e.pitch = offs[0];
-        if (offs.length > 1) e.chord = offs;
-      }
-      track.pattern[pos] = e;
+  // Stamp the captured chord onto step i. Returns false if nothing is captured
+  // yet (so the caller can fall back to a normal toggle).
+  function stampChordAt(track, i) {
+    if (!_capturedChord || !_capturedChord.length) return false;
+    if (!Array.isArray(track.pattern) || i >= track.pattern.length) return false;
+    const offs = [...new Set(_capturedChord)].sort((a, b) => a - b);
+    const e = defaultEntry(track);
+    if (track.kind === 'chord') {
+      e.degree = clamp(offs[0], 0, 6);
     } else {
-      track.pattern[pos] = false;   // rest
+      e.pitch = offs[0];
+      if (offs.length > 1) e.chord = offs;
     }
-    stepRecPos = (pos + 1) % track.pattern.length;
-    rebuildSteps(track);
-    updateRecHead(track);
+    track.pattern[i] = e;
+    return true;
   }
   function kbdNoteDown(e) {
     if (e.metaKey || e.ctrlKey || e.altKey) return;
@@ -12881,37 +12920,27 @@
     const track = tracks.find(t => t.id === selectedTrackId);
     if (!track || !KBD_PLAYABLE.has(track.kind)) return;
 
-    // Step-record transport keys (only while armed).
-    if (stepRecActive) {
-      if (e.code === 'Space')     { e.preventDefault(); if (!e.repeat) recWriteStep(track, null); return; }
-      if (e.code === 'Backspace') {
-        e.preventDefault();
-        if (!e.repeat) {
-          stepRecPos = (stepRecPos - 1 + track.pattern.length) % track.pattern.length;
-          track.pattern[stepRecPos] = false;
-          rebuildSteps(track); updateRecHead(track);
-        }
-        return;
-      }
-    }
-
     const offset = KBD_OFFSETS[e.code];
     if (offset === undefined) return;
     e.preventDefault();
     if (e.repeat || _kbdVoices.has(e.code)) return;     // ignore auto-repeat / already held
     const stop = startLiveVoice(track, offset);
     if (stop) _kbdVoices.set(e.code, stop);
-    if (stepRecActive) _recChord.add(offset);
+    if (stepRecActive) {
+      // Starting a fresh chord — clear the previous capture as the first key
+      // of a new voicing goes down, so quick re-plays don't accumulate.
+      if (_kbdVoices.size === 1) _recChord.clear();
+      _recChord.add(offset);
+    }
   }
   function kbdNoteUp(e) {
     const stop = _kbdVoices.get(e.code);
     if (stop) { stop(); _kbdVoices.delete(e.code); }
-    // When the last held key is released, commit the gathered chord to a step.
+    // When the last held key is released, capture the chord for placement.
     if (stepRecActive && _kbdVoices.size === 0 && _recChord.size > 0) {
-      const track = tracks.find(t => t.id === selectedTrackId);
-      const offs = [..._recChord];
+      _capturedChord = [..._recChord];
       _recChord.clear();
-      if (track) recWriteStep(track, offs);
+      refreshStepRecBtns();
     }
   }
   function releaseAllLiveVoices() {
@@ -13275,8 +13304,8 @@
             previewBtn.addEventListener('click', () => previewTrack(t));
             nameRow.appendChild(previewBtn);
             if (KBD_PLAYABLE.has(t.kind)) {
-              const recBtn = el('button', 'small step-rec-btn', '● Rec');
-              recBtn.title = 'Step-record: play chords on the keyboard to fill steps (Space = rest, Backspace = back)';
+              const recBtn = el('button', 'small step-rec-btn', stepRecActive ? capturedChordLabel() : '● Drop');
+              recBtn.title = 'Chord drop: arm, play a chord on the keyboard, then click steps to drop it (click a filled step to clear)';
               if (stepRecActive) recBtn.classList.add('on');
               recBtn.addEventListener('click', (e) => { e.stopPropagation(); setStepRec(t, !stepRecActive); });
               nameRow.appendChild(recBtn);
