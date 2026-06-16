@@ -10888,7 +10888,7 @@
         knob('fD', 0.01,  2,   0.01, track.fDecay,   v => track.fDecay   = v, v => v.toFixed(2)),
         knob('fS', 0,     1,   0.01, track.fSustain, v => track.fSustain = v, v => v.toFixed(2)),
         knob('fR', 0.01,  3,   0.01, track.fRelease, v => track.fRelease = v, v => v.toFixed(2)),
-        knob('aA', 0.001, 1, 0.001, track.attack,  v => track.attack  = v, v => v.toFixed(3)),
+        knob('aA', 0.001, 8, 0.001, track.attack,  v => track.attack  = v, v => v.toFixed(3)),
         knob('aD', 0.01,  2,   0.01, track.decay,   v => track.decay   = v, v => v.toFixed(2)),
         knob('aS', 0,     1,   0.01, track.sustain, v => track.sustain = v, v => v.toFixed(2)),
         knob('aR', 0.01,  8,   0.01, track.release, v => track.release = v, v => v.toFixed(2)),
@@ -10984,7 +10984,7 @@
         knob('fD', 0.01,  2,   0.01, track.fDecay,   v => track.fDecay   = v, v => v.toFixed(2)),
         knob('fS', 0,     1,   0.01, track.fSustain, v => track.fSustain = v, v => v.toFixed(2)),
         knob('fR', 0.01,  3,   0.01, track.fRelease, v => track.fRelease = v, v => v.toFixed(2)),
-        knob('aA', 0.001, 1, 0.001, track.attack,  v => track.attack  = v, v => v.toFixed(3)),
+        knob('aA', 0.001, 8, 0.001, track.attack,  v => track.attack  = v, v => v.toFixed(3)),
         knob('aD', 0.01,  2,   0.01, track.decay,   v => track.decay   = v, v => v.toFixed(2)),
         knob('aS', 0,     1,   0.01, track.sustain, v => track.sustain = v, v => v.toFixed(2)),
         knob('aR', 0.01,  8,   0.01, track.release, v => track.release = v, v => v.toFixed(2)),
@@ -12821,9 +12821,12 @@
     gate.connect(track.input);
     const length = LIVE_MAX_HOLD / stepDur;   // long hold (in steps) so it sustains
     const env = { stepDur, prevFreq: null, prevSlide: false };
-    // Neutral amp envelope: rise instantly to full and hold there, leaving the
-    // gate in sole charge of attack/release for the live note.
-    const liveTr = Object.assign({}, track, { attack: 0.002, decay: 0.004, sustain: 1, release: 0.02 });
+    // Let the voice keep its real decay/sustain (so a held note sits at the
+    // patch's own level, matching sequenced playback and not slamming the
+    // master bus) but neutralise its attack/release — the gate owns those for
+    // the live note. Forcing sustain to full here made chords run hot enough
+    // that the master compressor squashed the attack swell into near-silence.
+    const liveTr = Object.assign({}, track, { attack: 0.002, release: 0.02 });
     const step = (track.kind === 'chord')
       ? { degree: offset, quality: 'auto', length, vel: 1 }
       : { pitch: offset, slide: false, length, vel: 1 };
