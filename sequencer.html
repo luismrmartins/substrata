@@ -12813,9 +12813,16 @@
     const ctx = audioCtx;
     const bpm = parseFloat(bpmInput.value) || 120;
     const stepDur = (60 / bpm) / 4;
-    const at = ctx.currentTime + 0.02;
+    const t0 = ctx.currentTime;
+    const at = t0 + 0.02;
     const att = Math.max(0.002, track.attack != null ? track.attack : 0.005);
     const gate = ctx.createGain();
+    // Hold the gate silent from the very first sample — a fresh GainNode
+    // defaults to 1, and scheduling the drop only at `at` left a brief
+    // full-gain window. On a rich chord that onset spike leaks through as an
+    // instant transient that masks the swell, so the Attack knob seemed to do
+    // nothing. Anchoring at t0 keeps it silent until the ramp begins at `at`.
+    gate.gain.setValueAtTime(0.0001, t0);
     gate.gain.setValueAtTime(0.0001, at);
     gate.gain.linearRampToValueAtTime(1, at + att);   // Attack knob shapes the swell
     gate.connect(track.input);
