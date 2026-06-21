@@ -3166,6 +3166,44 @@
     body.mode-live .live-cell-morphs { min-width: 0; }
     body.mode-live .live-cell-morphs .live-morph-slider { width: 100%; }
   }
+
+  /* ---- MIDI control-surface panel ---- */
+  #midi .midi-status {
+    font-size: 11px; color: var(--muted); margin: 6px 0 10px;
+    display: flex; align-items: center; gap: 8px; min-height: 22px;
+  }
+  .midi-enable-btn {
+    background: var(--accent); color: #000; border: none; cursor: pointer;
+    font: inherit; font-size: 11px; font-weight: 600; letter-spacing: 0.4px;
+    padding: 5px 12px; border-radius: 3px;
+  }
+  .midi-enable-btn:hover { filter: brightness(1.1); }
+  .midi-row {
+    display: grid; grid-template-columns: 1fr 56px 56px 56px;
+    gap: 6px; align-items: center; margin-bottom: 5px;
+  }
+  .midi-row.midi-head {
+    font-size: 9px; text-transform: uppercase; letter-spacing: 0.6px;
+    color: var(--muted); margin-bottom: 6px;
+  }
+  .midi-head .midi-col { text-align: center; }
+  .midi-name {
+    font-size: 11px; color: var(--text); white-space: nowrap;
+    overflow: hidden; text-overflow: ellipsis;
+  }
+  .midi-na { text-align: center; color: var(--muted); opacity: 0.4; }
+  .midi-learn-btn {
+    background: transparent; border: 1px solid var(--cell-border); color: var(--muted);
+    font: inherit; font-size: 10px; padding: 4px 0; cursor: pointer;
+    border-radius: 3px; text-align: center; white-space: nowrap; overflow: hidden;
+  }
+  .midi-learn-btn:hover { border-color: var(--text); color: var(--text); }
+  .midi-learn-btn.bound { color: var(--accent); border-color: var(--accent); }
+  .midi-learn-btn.learning {
+    background: #c0392b; border-color: #c0392b; color: #fff;
+    animation: midiBlink 0.8s steps(2, start) infinite;
+  }
+  @keyframes midiBlink { 50% { opacity: 0.45; } }
 </style>
 </head>
 <body class="mode-recording">
@@ -3306,6 +3344,11 @@
            direct grid child of `.side` in Effects mode and own the
            full-height right-hand column. -->
       <div class="module" id="master"></div>
+
+      <section class="fx-section">
+        <h3 class="fx-section-title">Control</h3>
+        <div class="module" id="midi"></div>
+      </section>
 
       <section class="fx-section">
         <h3 class="fx-section-title">Mastering</h3>
@@ -13173,6 +13216,7 @@
     tracksEl.innerHTML = '';
     _masterMeterFill = null;
     _masterMeterSegs = null;
+    refreshMidiPanel();   // keep the MIDI control panel's track list in sync
 
     if (currentMode === 'recording') {
       // Three-zone layout: instruments column + sequencer panel + details
@@ -13718,10 +13762,10 @@
     strip.appendChild(masterMeterRes.meter);
 
     const faderWrap = el('div', 'mix-fader-wrap');
-    const fader = el('input', 'mix-fader');
+    const fader = el('input', 'mix-fader js-master-vol');
     fader.type = 'range';
     fader.min = 0; fader.max = 1.2; fader.step = 0.01; fader.value = master.vol;
-    const label = el('span', 'mix-vol-val', Number(master.vol).toFixed(2));
+    const label = el('span', 'mix-vol-val js-master-vol-label', Number(master.vol).toFixed(2));
     fader.addEventListener('input', () => {
       const v = parseFloat(fader.value);
       master.vol = v;
@@ -13917,6 +13961,183 @@
     m.appendChild(grid);
   }
 
+  // ========================= MIDI control surface =========================
+  // Web MIDI lets a hardware fader/button controller perform the mixer live.
+  // Each track's Volume / Mute / Arm (plus the master fader) can be MIDI-learned:
+  // click a target, move a fader or press a button, and the app captures the
+  // exact message that control sends (type + channel + CC/note) and binds it.
+  // Captured this way it works with any controller regardless of its layout.
+  let midiAccess = null;
+  let midiEnabled = false;
+  let midiLearn = null;            // pending learn target: { kind, trackId }
+  let midiBindings = [];           // [{ sig, kind, trackId }]  kind: vol|mute|arm|mvol
+  let _midiPanelEl = null;
+
+  const midiSig = (type, ch, d1) => type + ':' + ch + ':' + d1;
+
+  // Central volume setter so a MIDI fader move updates the gain node AND every
+  // on-screen fader/label bound to the track, keeping the UI in sync.
+  function setTrackVolume(track, v) {
+    v = Math.max(0, Math.min(1.2, v));
+    track.volume = v;
+    if (track.volNode && audioCtx) track.volNode.gain.setTargetAtTime(v, audioCtx.currentTime, 0.01);
+    if (track._liveVol)     track._liveVol.value = v;
+    if (track._liveVolVal)  track._liveVolVal.textContent = v.toFixed(2);
+    if (track._mixFader)    track._mixFader.value = v;
+    if (track._mixVolLabel) track._mixVolLabel.textContent = v.toFixed(2);
+  }
+  function setMasterVolumeFromMidi(v) {
+    v = Math.max(0, Math.min(1.2, v));
+    master.vol = v;
+    if (masterOut && audioCtx) masterOut.gain.setTargetAtTime(v, audioCtx.currentTime, 0.01);
+    document.querySelectorAll('.js-master-vol').forEach(i => { i.value = v; });
+    document.querySelectorAll('.js-master-vol-label').forEach(l => { l.textContent = v.toFixed(2); });
+  }
+
+  async function enableMidi() {
+    if (!navigator.requestMIDIAccess) { alert('Web MIDI is not supported in this browser — use Chrome or Edge.'); return; }
+    try {
+      midiAccess = await navigator.requestMIDIAccess({ sysex: false });
+      midiEnabled = true;
+      attachMidiInputs();
+      midiAccess.onstatechange = attachMidiInputs;
+    } catch (e) {
+      midiEnabled = false;
+      alert('Could not access MIDI: ' + (e && e.message ? e.message : e));
+    }
+    refreshMidiPanel();
+  }
+  function attachMidiInputs() {
+    if (!midiAccess) return;
+    midiAccess.inputs.forEach(inp => { inp.onmidimessage = onMidiMessage; });
+    refreshMidiPanel();
+  }
+  function midiInputNames() {
+    const names = [];
+    if (midiAccess) midiAccess.inputs.forEach(i => names.push(i.name || 'MIDI'));
+    return names;
+  }
+
+  function onMidiMessage(ev) {
+    const data = ev.data; if (!data || data.length < 2) return;
+    const type = data[0] & 0xf0, ch = data[0] & 0x0f, d1 = data[1], d2 = data[2] || 0;
+    let mtype;
+    if (type === 0xB0) mtype = 'cc';
+    else if (type === 0x90 && d2 > 0) mtype = 'note';
+    else return;   // ignore note-off, pitch-bend, aftertouch, clock, etc.
+    const sig = midiSig(mtype, ch, d1);
+
+    if (midiLearn) {
+      // Bind this control to the pending target. Drop any prior binding for
+      // the same target, and any other target already on this control.
+      midiBindings = midiBindings.filter(b =>
+        !(b.kind === midiLearn.kind && b.trackId === midiLearn.trackId) && b.sig !== sig);
+      midiBindings.push({ sig, kind: midiLearn.kind, trackId: midiLearn.trackId });
+      midiLearn = null;
+      refreshMidiPanel();
+      return;
+    }
+
+    const isPress = (mtype === 'note') || (mtype === 'cc' && d2 >= 64);
+    const deferred = currentMode === 'mixing' || currentMode === 'live';
+    for (const b of midiBindings) {
+      if (b.sig !== sig) continue;
+      if (b.kind === 'mvol') { if (mtype === 'cc') setMasterVolumeFromMidi((d2 / 127) * 1.2); continue; }
+      const t = tracks.find(x => x.id === b.trackId);
+      if (!t) continue;
+      if (b.kind === 'vol') { if (mtype === 'cc') setTrackVolume(t, (d2 / 127) * 1.2); }
+      else if (b.kind === 'mute' && isPress) {
+        const visible = (t._pendingMute !== undefined) ? t._pendingMute : t.mute;
+        setMuteAcross(t, !visible, deferred);
+      }
+      else if (b.kind === 'arm' && isPress) {
+        const visible = (t._pendingArmed !== undefined) ? t._pendingArmed : t.armed;
+        setArmedAcross(t, !visible, deferred);
+      }
+    }
+  }
+
+  function midiBindingLabel(kind, trackId) {
+    const b = midiBindings.find(x => x.kind === kind && x.trackId === trackId);
+    if (!b) return '—';
+    const parts = b.sig.split(':');
+    return (parts[0] === 'cc' ? 'CC' : 'N') + parts[2] + '·ch' + (parseInt(parts[1], 10) + 1);
+  }
+  function midiLearnBtn(kind, trackId, label) {
+    const learning = !!(midiLearn && midiLearn.kind === kind && midiLearn.trackId === trackId);
+    const bound = midiBindings.some(x => x.kind === kind && x.trackId === trackId);
+    const b = el('button', 'midi-learn-btn' + (learning ? ' learning' : '') + (bound ? ' bound' : ''),
+                 learning ? 'learning…' : midiBindingLabel(kind, trackId));
+    b.title = label + ' — click to MIDI-learn, right-click to clear';
+    b.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (!midiEnabled) enableMidi();
+      midiLearn = learning ? null : { kind, trackId };
+      refreshMidiPanel();
+    });
+    b.addEventListener('contextmenu', (e) => {
+      e.preventDefault(); e.stopPropagation();
+      midiBindings = midiBindings.filter(x => !(x.kind === kind && x.trackId === trackId));
+      if (midiLearn && midiLearn.kind === kind && midiLearn.trackId === trackId) midiLearn = null;
+      refreshMidiPanel();
+    });
+    return b;
+  }
+  function buildMidiPanel() { _midiPanelEl = document.getElementById('midi'); refreshMidiPanel(); }
+  function refreshMidiPanel() {
+    const m = _midiPanelEl || document.getElementById('midi');
+    if (!m) return;
+    m.innerHTML = '';
+    m.appendChild(el('h2', null, 'MIDI Control'));
+    const status = el('div', 'midi-status');
+    if (!navigator.requestMIDIAccess) {
+      status.textContent = 'Web MIDI unsupported — use Chrome or Edge';
+    } else if (!midiEnabled) {
+      const b = el('button', 'midi-enable-btn', 'Enable MIDI');
+      b.addEventListener('click', enableMidi);
+      status.appendChild(b);
+    } else {
+      const names = midiInputNames();
+      status.textContent = names.length ? ('● ' + names.join(', ')) : '● enabled — no inputs detected';
+    }
+    m.appendChild(status);
+
+    const head = el('div', 'midi-row midi-head');
+    head.appendChild(el('span', 'midi-name', 'Track'));
+    head.appendChild(el('span', 'midi-col', 'Vol'));
+    head.appendChild(el('span', 'midi-col', 'Mute'));
+    head.appendChild(el('span', 'midi-col', 'Arm'));
+    m.appendChild(head);
+
+    const mrow = el('div', 'midi-row');
+    mrow.appendChild(el('span', 'midi-name', 'Master'));
+    mrow.appendChild(midiLearnBtn('mvol', null, 'Master volume'));
+    mrow.appendChild(el('span', 'midi-col midi-na', '·'));
+    mrow.appendChild(el('span', 'midi-col midi-na', '·'));
+    m.appendChild(mrow);
+
+    for (const t of tracks) {
+      const row = el('div', 'midi-row');
+      row.appendChild(el('span', 'midi-name', t.name || t.kind));
+      row.appendChild(midiLearnBtn('vol',  t.id, (t.name || t.kind) + ' volume'));
+      row.appendChild(midiLearnBtn('mute', t.id, (t.name || t.kind) + ' mute'));
+      row.appendChild(midiLearnBtn('arm',  t.id, (t.name || t.kind) + ' arm'));
+      m.appendChild(row);
+    }
+  }
+  function serializeMidiBindings() {
+    return midiBindings
+      .map(b => ({ sig: b.sig, kind: b.kind, trackIndex: b.kind === 'mvol' ? null : tracks.findIndex(t => t.id === b.trackId) }))
+      .filter(b => b.kind === 'mvol' || (b.trackIndex != null && b.trackIndex >= 0));
+  }
+  function restoreMidiBindings(arr) {
+    if (!Array.isArray(arr)) { midiBindings = []; refreshMidiPanel(); return; }
+    midiBindings = arr
+      .map(b => ({ sig: b.sig, kind: b.kind, trackId: b.kind === 'mvol' ? null : (tracks[b.trackIndex] ? tracks[b.trackIndex].id : null) }))
+      .filter(b => b.kind === 'mvol' || b.trackId != null);
+    refreshMidiPanel();
+  }
+
   // ---------- save / load ----------
   const SAVE_KEYS = {
     common: ['name','kind','steps','pattern','volume','pan','mute','solo','armed','group','groups','swing','mono','noteLen','expanded',
@@ -14003,6 +14224,7 @@
       tracks: tracks.map(serializeTrack),
       master, delayCfg, spaceEchoCfg, reverbCfg, chorusCfg, flangerCfg, bitcrushCfg, compCfg, duckCfg, tapeCfg, lofiCfg, lpfCfg, hpfCfg,
       decks: { A: deckSnap(decks.A), B: deckSnap(decks.B), xfade: decks.xfade },
+      midi: serializeMidiBindings(),
     };
   }
   function applyAllParams() {
@@ -14226,6 +14448,7 @@
       });
       decks.xfade = data.decks.xfade ?? 0.5;
     }
+    restoreMidiBindings(data.midi);
     applyAllParams();
     rebuildAllUI();
     // restore granular sample buffers from project folder
@@ -14757,10 +14980,10 @@
 
     const volWrap = el('div', 'live-master-vol');
     volWrap.appendChild(el('span', 'lbl', 'Vol'));
-    const volSlider = el('input');
+    const volSlider = el('input', 'js-master-vol');
     volSlider.type='range'; volSlider.min=0; volSlider.max=1.2; volSlider.step=0.01;
     volSlider.value = master.vol;
-    const volVal = el('span', 'v', Number(master.vol).toFixed(2));
+    const volVal = el('span', 'v js-master-vol-label', Number(master.vol).toFixed(2));
     volSlider.addEventListener('input', () => {
       const v = parseFloat(volSlider.value);
       master.vol = v;
@@ -15175,6 +15398,7 @@
   buildDelay(); buildSpaceEcho(); buildReverb();
   buildChorus(); buildFlanger(); buildBitcrush(); buildTape(); buildLoFi();
   buildLPFilter(); buildHPFilter();
+  buildMidiPanel();
   applyCollapsibles();
   setupEffectsResizeObserver();
 </script>
