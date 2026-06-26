@@ -374,6 +374,30 @@
   }
   button.rec:hover { border-color: var(--text); }
   button.rec.on { background: var(--text); color: var(--bg); border-color: var(--text); }
+  /* Recording timer — sits next to the record dot. Hidden until the first
+     recording, ticks red while capturing, then dims to show the final length. */
+  .rec-timer {
+    display: none;
+    align-items: center;
+    font-variant-numeric: tabular-nums;
+    font-size: 13px; line-height: 1;
+    letter-spacing: 0.02em;
+    padding: 0 6px; height: 28px;
+    border: 1px solid var(--cell-border);
+    border-radius: 3px;
+    color: var(--text-dim, var(--text));
+    opacity: 0.65;
+    white-space: nowrap;
+  }
+  .rec-timer.on, .rec-timer.done { display: inline-flex; }
+  .rec-timer.on {
+    color: #ff4b4b;
+    border-color: #ff4b4b;
+    opacity: 1;
+    animation: recTimerBlink 1s steps(2, start) infinite;
+  }
+  @keyframes recTimerBlink { 50% { opacity: 0.55; } }
+  .rec-timer .rec-timer-dot { margin-right: 5px; font-size: 9px; }
   .transport button.small,
   .live-controls button.small,
   .module button.small,
@@ -813,6 +837,53 @@
     border-color: var(--accent);
     color: var(--accent);
   }
+  /* Setups dropdown — anchored popover in the transport bar. */
+  .setups-wrap { position: relative; display: inline-block; }
+  .setups-menu {
+    display: none;
+    position: absolute;
+    top: calc(100% + 4px);
+    right: 0;
+    z-index: 60;
+    min-width: 220px;
+    max-height: 60vh;
+    overflow-y: auto;
+    flex-direction: column;
+    gap: 2px;
+    padding: 6px;
+    background: var(--bg);
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    box-shadow: 0 6px 24px rgba(0,0,0,0.35);
+  }
+  .setups-menu.open { display: flex; }
+  .setups-menu-head {
+    font-size: 10px; letter-spacing: 0.6px; text-transform: uppercase;
+    color: var(--muted); padding: 4px 8px 2px;
+  }
+  .setups-menu-sep { height: 1px; background: var(--line); margin: 5px 0; }
+  .setup-row { display: flex; align-items: stretch; gap: 2px; }
+  .setup-row .setup-load {
+    flex: 1 1 auto;
+    background: transparent; border: 1px solid transparent; color: var(--text);
+    font: inherit; font-size: 12px; padding: 6px 8px; cursor: pointer; text-align: left;
+    border-radius: 3px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .setup-row .setup-load:hover { background: rgba(139,92,246,0.08); border-color: var(--accent); color: var(--accent); }
+  .setup-row .setup-load .setup-meta { color: var(--muted); font-size: 10px; margin-left: 6px; }
+  .setup-row .setup-del {
+    flex: 0 0 auto;
+    background: transparent; border: 1px solid transparent; color: var(--muted);
+    font: inherit; font-size: 13px; padding: 0 8px; cursor: pointer; border-radius: 3px;
+  }
+  .setup-row .setup-del:hover { color: #ff4b4b; border-color: #ff4b4b; }
+  .setups-action {
+    background: transparent; border: 1px dashed var(--cell-border); color: var(--text);
+    font: inherit; font-size: 12px; padding: 7px 8px; cursor: pointer; text-align: left; border-radius: 3px;
+  }
+  .setups-action:hover { border-color: var(--accent); color: var(--accent); border-style: solid; }
+  .setups-empty { color: var(--muted); font-size: 11px; padding: 6px 8px; font-style: italic; }
   .panel-sequencer .mic-control { margin: 0; }
   /* Sections in the right-side details panel — no boxes, stacked
      vertically and separated by horizontal divider lines. */
@@ -3219,6 +3290,7 @@
       </h1>
           <button id="play" class="play" title="Play / Stop">▶</button>
           <button id="rec" class="rec" title="Record master output to WAV">●</button>
+          <span id="rec-timer" class="rec-timer" title="length of the current / last recording"><span class="rec-timer-dot">●</span><span id="rec-timer-text">0:00</span></span>
           <button id="realign" class="small" title="snap every track back to step 0 of its loop (kills timing drift)">↺ Sync</button>
           <div class="field">
             <label for="bpm">BPM</label>
@@ -3236,6 +3308,10 @@
           <span id="folder-name" class="folder-name">no folder</span>
           <button id="save" class="small" title="Save (shift-click to rename)">Save</button>
           <button id="load" class="small">Load</button>
+          <div id="setups-wrap" class="setups-wrap">
+            <button id="setups-btn" class="small" title="Save / load a fixed instrument setup to start a track quickly">⚙ Setups ▾</button>
+            <div id="setups-menu" class="setups-menu"></div>
+          </div>
           <button id="artwork" class="small" title="generate artwork from this song">▨ Art</button>
           <span id="project-name" class="folder-name"></span>
           <button id="theme" class="small" title="toggle dark/light">☼</button>
@@ -15258,6 +15334,140 @@
   document.getElementById('load').addEventListener('click', openLoadDialog);
   document.getElementById('artwork').addEventListener('click', () => openArtworkModal());
 
+  // ---------- Instrument setups (fixed instrument templates) ----------
+  // A "setup" is a saved lineup of instruments — their kinds, sounds and
+  // patterns — so you can jump straight into a track with your usual rig
+  // (a couple of drums, a few SH-101s, basses, chords…) instead of adding
+  // and dialling each one in from scratch. Stored in localStorage,
+  // independent of full projects. Loading a setup replaces the current
+  // instruments but leaves the master / FX chain untouched.
+  const SETUPS_KEY = 'substrata-setups';
+  function getSetups() {
+    try { return JSON.parse(localStorage.getItem(SETUPS_KEY) || '{}'); }
+    catch (e) { return {}; }
+  }
+  function putSetups(store) {
+    try { localStorage.setItem(SETUPS_KEY, JSON.stringify(store)); }
+    catch (e) { alert('Could not save setup (storage full?).'); }
+  }
+  function saveCurrentSetup() {
+    if (!tracks.length) { alert('No instruments to save — add some tracks first.'); return; }
+    const store = getSetups();
+    const name = window.prompt('Save current instruments as a setup named:', '');
+    if (!name) return;
+    const key = name.trim();
+    if (!key) return;
+    if (store[key] && !window.confirm('A setup called "' + key + '" already exists. Overwrite it?')) return;
+    store[key] = {
+      bpm: parseFloat(bpmInput.value),
+      tracks: tracks.map(serializeTrack),
+      savedAt: Date.now(),
+    };
+    putSetups(store);
+    renderSetupsMenu();
+  }
+  function deleteSetup(key) {
+    const store = getSetups();
+    if (!store[key]) return;
+    if (!window.confirm('Delete setup "' + key + '"?')) return;
+    delete store[key];
+    putSetups(store);
+    renderSetupsMenu();
+  }
+  function loadSetup(key, opts) {
+    opts = opts || {};
+    const store = getSetups();
+    const setup = store[key];
+    if (!setup || !Array.isArray(setup.tracks)) { alert('Setup not found.'); return; }
+    if (tracks.length && !window.confirm(
+      'Load setup "' + key + '"?\nThis replaces the ' + tracks.length +
+      ' current instrument' + (tracks.length === 1 ? '' : 's') + '.')) return;
+    stop();
+    for (const t of tracks) destroyTrackAudio(t);
+    tracks.length = 0;
+    nextTrackId = 1;
+    for (const td of setup.tracks) {
+      const data = opts.clearPatterns ? clearTrackPattern(td) : td;
+      const t = makeTrack(data.kind, data);
+      if (t.kind === 'mic') { t.enabled = false; t.stream = null; t.micSource = null; }
+      tracks.push(t);
+      if (audioCtx) initTrackAudio(t);
+    }
+    if (setup.bpm !== undefined) bpmInput.value = setup.bpm;
+    selectedTrackId = tracks.length ? tracks[0].id : null;
+    applyAllParams();
+    rebuildAllUI();
+    rebuildDuckerSourceOptions();
+    if (projectDir) reloadGranularSamples();
+    setupsMenu.classList.remove('open');
+  }
+  // Return a copy of a serialized track with its step pattern emptied —
+  // for loading a setup as a clean slate to start writing on.
+  function clearTrackPattern(td) {
+    const copy = JSON.parse(JSON.stringify(td));
+    if (Array.isArray(copy.pattern)) copy.pattern = copy.pattern.map(() => 0);
+    if (copy.patternBanks) {
+      for (const k in copy.patternBanks) {
+        const bank = copy.patternBanks[k];
+        if (bank && Array.isArray(bank.pattern)) bank.pattern = bank.pattern.map(() => 0);
+      }
+    }
+    return copy;
+  }
+
+  const setupsBtn  = document.getElementById('setups-btn');
+  const setupsMenu = document.getElementById('setups-menu');
+  const setupsWrap = document.getElementById('setups-wrap');
+  function renderSetupsMenu() {
+    const store = getSetups();
+    const names = Object.keys(store).sort((a, b) => a.localeCompare(b));
+    setupsMenu.innerHTML = '';
+
+    const head = el('div', 'setups-menu-head', 'Load setup');
+    setupsMenu.appendChild(head);
+
+    if (!names.length) {
+      setupsMenu.appendChild(el('div', 'setups-empty', 'No setups saved yet'));
+    } else {
+      names.forEach(key => {
+        const setup = store[key];
+        const count = Array.isArray(setup.tracks) ? setup.tracks.length : 0;
+        const row = el('div', 'setup-row');
+        const load = el('button', 'setup-load');
+        load.appendChild(document.createTextNode(key));
+        const meta = el('span', 'setup-meta',
+          count + ' inst' + (count === 1 ? '' : 's'));
+        load.appendChild(meta);
+        load.title = 'Load "' + key + '" — hold Alt to load with empty patterns';
+        load.addEventListener('click', (e) => loadSetup(key, { clearPatterns: e.altKey }));
+        const del = el('button', 'setup-del', '✕');
+        del.title = 'Delete this setup';
+        del.addEventListener('click', (e) => { e.stopPropagation(); deleteSetup(key); });
+        row.appendChild(load);
+        row.appendChild(del);
+        setupsMenu.appendChild(row);
+      });
+    }
+
+    setupsMenu.appendChild(el('div', 'setups-menu-sep'));
+    const saveAct = el('button', 'setups-action', '＋ Save current instruments…');
+    saveAct.addEventListener('click', saveCurrentSetup);
+    setupsMenu.appendChild(saveAct);
+
+    const hint = el('div', 'setups-empty',
+      'Tip: Alt-click a setup to load it with empty patterns.');
+    setupsMenu.appendChild(hint);
+  }
+  setupsBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const open = setupsMenu.classList.toggle('open');
+    if (open) renderSetupsMenu();
+  });
+  document.addEventListener('click', (e) => {
+    if (!setupsWrap.contains(e.target)) setupsMenu.classList.remove('open');
+  });
+  renderSetupsMenu();
+
   // ---------- recording (master output → WAV) ----------
   // Tap the post-master signal with a ScriptProcessor, accumulate stereo
   // float samples while recording, then encode a 16-bit PCM WAV on stop.
@@ -15266,6 +15476,39 @@
   let recording = false;
   let recBufL = [], recBufR = [], recSampleRate = 44100;
   const recBtn = document.getElementById('rec');
+
+  // ---- Recording timer ----
+  // Ticks while a master recording is in progress, freezes on the final
+  // length when it stops. Independent of the audio buffer so it keeps
+  // running even if onaudioprocess stalls.
+  let recTimerInterval = null, recStartTime = 0;
+  const recTimerEl = document.getElementById('rec-timer');
+  const recTimerText = document.getElementById('rec-timer-text');
+  function fmtRecTime(sec) {
+    sec = Math.max(0, sec);
+    const h = Math.floor(sec / 3600);
+    const m = Math.floor((sec % 3600) / 60);
+    const s = Math.floor(sec % 60);
+    const mm = h ? String(m).padStart(2, '0') : String(m);
+    return (h ? h + ':' : '') + mm + ':' + String(s).padStart(2, '0');
+  }
+  function updateRecTimer() {
+    recTimerText.textContent = fmtRecTime((performance.now() - recStartTime) / 1000);
+  }
+  function startRecTimer() {
+    recStartTime = performance.now();
+    recTimerEl.classList.remove('done');
+    recTimerEl.classList.add('on');
+    updateRecTimer();
+    if (recTimerInterval) clearInterval(recTimerInterval);
+    recTimerInterval = setInterval(updateRecTimer, 200);
+  }
+  function stopRecTimer() {
+    if (recTimerInterval) { clearInterval(recTimerInterval); recTimerInterval = null; }
+    updateRecTimer();   // freeze on the final length
+    recTimerEl.classList.remove('on');
+    recTimerEl.classList.add('done');
+  }
 
   function startRecording() {
     initAudio();
@@ -15293,6 +15536,7 @@
     recording = true;
     recBtn.classList.add('on');
     recBtn.textContent = '■';
+    startRecTimer();
   }
 
   async function stopRecording() {
@@ -15300,6 +15544,7 @@
     recording = false;
     recBtn.classList.remove('on');
     recBtn.textContent = '●';
+    stopRecTimer();
     const blob = encodeWavBlob(recBufL, recBufR, recSampleRate);
     recBufL = []; recBufR = [];
     const ts = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
